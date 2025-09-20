@@ -1,0 +1,14 @@
+PyQt6
+qt-material
+psutil
+GPUtil
+pyqtgraph
+scapy
+lxml
+reportlab
+python-docx
+bcrypt
+Pillow
+nvdlib
+getsploit
+numpy
