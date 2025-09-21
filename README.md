@@ -1,8 +1,8 @@
-# GScapy + AI - The Modern Scapy Interface with AI
+# Zurvan + AI - The Modern Scapy Interface with AI
 
 **Version 3.0**
 
-GScapy + AI is a modern, feature-rich graphical user interface for the powerful Scapy packet manipulation library, now supercharged with AI analysis capabilities. Built with Python and PyQt6, it provides a user-friendly environment for network sniffing, packet crafting, and running various network tools for security testing and analysis.
+Zurvan + AI is a modern, feature-rich graphical user interface for the powerful Scapy packet manipulation library, now supercharged with AI analysis capabilities. Built with Python and PyQt6, it provides a user-friendly environment for network sniffing, packet crafting, and running various network tools for security testing and analysis.
 
 ### What's New in Version 3.0
 - **User Accounts & Profiles:** The application now supports multiple user accounts with password protection and user avatars.
@@ -13,7 +13,7 @@ GScapy + AI is a modern, feature-rich graphical user interface for the powerful 
 
 ## Features
 
-GScapy is organized into a series of tabs, each dedicated to a specific function:
+Zurvan is organized into a series of tabs, each dedicated to a specific function:
 
 ### 1. User Accounts & Profiles
 - **Secure Login:** Support for multiple users with password-protected logins.
@@ -103,11 +103,11 @@ Because GScapy uses raw sockets for most of its operations, it requires administ
 
 **On Linux/macOS:**
 ```bash
-sudo python gscapy.py
+sudo python zurvan.py
 ```
 
 **On Windows:**
 Right-click on your terminal (Command Prompt or PowerShell) and select "Run as administrator", then run the script:
 ```bash
-python gscapy.py
+python zurvan.py
 ```

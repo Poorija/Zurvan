@@ -1173,15 +1173,15 @@ class SherlockResultsDialog(QDialog):
             self.tree.addTopLevelItem(QTreeWidgetItem([f"An unexpected error occurred: {e}"]))
 
 # --- Main Application ---
-class GScapy(QMainWindow):
+class Zurvan(QMainWindow):
     """The main application window, holding all UI elements and logic."""
     def __init__(self):
         """Initializes the main window, UI components, and internal state."""
         super().__init__()
-        self.setWindowTitle("GScapy + AI - The Modern Scapy Interface with AI")
+        self.setWindowTitle("Zurvan + AI - The Modern Scapy Interface with AI")
         # Construct path to icon relative to the script's location for robustness
         script_dir = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(script_dir, "icons", "new_logo.png")
+        icon_path = os.path.join(script_dir, "icons", "Zurvan-mono.png")
         self.setWindowIcon(QIcon(icon_path))
         self.setGeometry(100, 100, 1200, 800)
 
@@ -1263,7 +1263,7 @@ class GScapy(QMainWindow):
 
         self._update_tool_targets() # Initial population after all widgets are created
         self._set_user_avatar()
-        logging.info("GScapy application initialized.")
+        logging.info("Zurvan application initialized.")
 
     def _set_user_avatar(self):
         """Sets the user profile button icon based on the user's avatar."""
@@ -1329,11 +1329,11 @@ class GScapy(QMainWindow):
         logging.info(f"Updating menu bar for user: {self.current_user}")
         if self.current_user and self.current_user.get('is_admin'):
             admin_menu = self.menu_bar.addMenu("&Admin")
-            admin_menu.addAction(QIcon("icons/new_logo.png"), "Admin Panel...", self._show_admin_panel)
+            admin_menu.addAction(QIcon("icons/Zurvan-mono.png"), "Admin Panel...", self._show_admin_panel)
 
         # --- Help Menu ---
         help_menu = self.menu_bar.addMenu("&Help")
-        help_menu.addAction("&About GScapy", self._show_about_dialog)
+        help_menu.addAction("&About Zurvan", self._show_about_dialog)
         help_menu.addSeparator()
         help_menu.addAction("&AI Settings...", self._show_ai_settings_dialog)
         help_menu.addAction("AI Guide", self._show_ai_guide_dialog)
@@ -1417,14 +1417,14 @@ class GScapy(QMainWindow):
 
     def _show_about_dialog(self):
         dialog = QMessageBox(self)
-        dialog.setWindowTitle("About GScapy + AI")
+        dialog.setWindowTitle("About Zurvan + AI")
 
         # Add the logo
-        pixmap = QIcon(os.path.join("icons", "new_logo.png")).pixmap(80, 80)
+        pixmap = QIcon(os.path.join("icons", "Zurvan.png")).pixmap(80, 80)
         dialog.setIconPixmap(pixmap)
 
         about_text = """
-        <b>GScapy + AI v3.0</b>
+        <b>Zurvan + AI v3.0</b>
         <p>The Modern Scapy Interface with AI.</p>
         <p>This application provides tools for sniffing, crafting, and analyzing network packets, with AI-powered analysis and guidance.</p>
         <br>
@@ -1445,9 +1445,9 @@ class GScapy(QMainWindow):
 
         # Add Logo and Tooltip
         logo_label = QLabel()
-        logo_pixmap = QIcon(os.path.join("icons", "new_logo.png")).pixmap(40, 40)
+        logo_pixmap = QIcon(os.path.join("icons", "Zurvan-mono.png")).pixmap(40, 40)
         logo_label.setPixmap(logo_pixmap)
-        logo_label.setToolTip("GScapy made by Poorija, Email: mohammadmahdi.farhadianfard@gmail.com")
+        logo_label.setToolTip("Zurvan made by Poorija, Email: mohammadmahdi.farhadianfard@gmail.com")
         resource_layout.addWidget(logo_label)
         resource_layout.addSpacing(15)
 
@@ -2072,7 +2072,7 @@ class GScapy(QMainWindow):
         """Configures the logging system to output to a file and the UI panel."""
         root_logger = logging.getLogger()
         for handler in root_logger.handlers[:]: root_logger.removeHandler(handler)
-        file_handler = logging.FileHandler('gscapy.log', mode='w')
+        file_handler = logging.FileHandler('zurvan.log', mode='w')
         formatter = logging.Formatter('%(asctime)s - %(threadName)s - %(levelname)s - %(message)s')
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
@@ -9870,7 +9870,7 @@ class GScapy(QMainWindow):
             self.wpa_crack_output.appendPlainText(f"Crunch finished successfully. Wordlist saved to:\n{outfile}")
             self.wpa_wordlist_edit.setText(outfile)
         else:
-            self.wpa_crack_output.appendPlainText(f"Crunch finished with an error (code: {returncode}). Check gscapy.log for details.")
+            self.wpa_crack_output.appendPlainText(f"Crunch finished with an error (code: {returncode}). Check zurvan.log for details.")
 
     def _handle_ps_worker_finished(self, total_threads):
         with self.ps_thread_lock:
@@ -10607,7 +10607,7 @@ class GScapy(QMainWindow):
             QMessageBox.information(self, "Empty Chain", "There is nothing to save.")
             return
 
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Test Chain", "", "GScapy LAB Files (*.gscapy-lab)", options=QFileDialog.Option.DontUseNativeDialog)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Test Chain", "", "Zurvan LAB Files (*.zurvan-lab)", options=QFileDialog.Option.DontUseNativeDialog)
         if not file_path:
             return
 
@@ -10626,7 +10626,7 @@ class GScapy(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 return
 
-        file_path, _ = QFileDialog.getOpenFileName(self, "Load Test Chain", "", "GScapy LAB Files (*.gscapy-lab);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
+        file_path, _ = QFileDialog.getOpenFileName(self, "Load Test Chain", "", "Zurvan LAB Files (*.zurvan-lab);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
         if not file_path:
             return
 
@@ -10710,7 +10710,7 @@ class GScapy(QMainWindow):
 import database
 
 def main():
-    """Main function to launch the GScapy application."""
+    """Main function to launch the Zurvan application."""
     try:
         database.initialize_database()
         if 'scapy' not in sys.modules: raise ImportError
@@ -10771,11 +10771,11 @@ def main():
         # This ensures the main window gets the final selected theme.
         apply_stylesheet(app, theme=login_dialog.selected_theme, extra=extra_qss)
 
-        window = GScapy()
+        window = Zurvan()
         window.current_user = login_dialog.current_user
         # Set window title with username
         if window.current_user and 'username' in window.current_user:
-            window.setWindowTitle(f"Welcome, {window.current_user['username']} - GScapy + AI - The Modern Scapy Interface with AI")
+            window.setWindowTitle(f"Welcome, {window.current_user['username']} - Zurvan + AI - The Modern Scapy Interface with AI")
         window._update_menu_bar() # Populate the menu now that we have a user
         window.show()
         sys.exit(app.exec())

@@ -4,7 +4,7 @@ import os
 import logging
 from datetime import datetime, timedelta
 
-DATABASE_NAME = "gscapy_user_data.db"
+DATABASE_NAME = "zurvan_user_data.db"
 
 def get_db_connection():
     """Establishes a connection to the SQLite database."""
@@ -119,7 +119,7 @@ def create_admin_user():
     # If admin does not exist, create it
     admin_username = "admin"
     admin_password = "F@rh@dyan2281251462"
-    admin_email = "admin@gscapy.local"
+    admin_email = "admin@zurvan.local"
     hashed_password = hash_password(admin_password)
 
     cursor.execute("""
@@ -260,7 +260,7 @@ def get_all_users():
     """Retrieves all users from the database for the admin panel."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, email, is_admin, is_active, full_name, age, job_title FROM users")
+    cursor.execute("SELECT id, username, email, is_admin, is_active, full_name, age, job_title, avatar FROM users")
     users = cursor.fetchall()
     conn.close()
     return users
