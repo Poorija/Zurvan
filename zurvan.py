@@ -1703,6 +1703,12 @@ class Zurvan(QMainWindow):
         try:
             # The user_id is passed to get history for the current user only
             history_records = database.get_test_history(self.current_user['id'])
+            if not history_records:
+                # Use a placeholder item to show a message in the tree itself
+                placeholder_item = QTreeWidgetItem(["No history found for your user."])
+                self.history_tree.addTopLevelItem(placeholder_item)
+                return
+
             for record in history_records:
                 # The 'results' column can be long, so we'll show a summary.
                 summary = (record['results'] or "").split('\n')[0]
@@ -1810,26 +1816,39 @@ class Zurvan(QMainWindow):
     def _recent_threats_thread(self):
         """Worker thread to fetch the last 30 CVEs."""
         q = self.tool_results_queue
+        data = [] # Default to an empty list
         try:
             url = "https://cve.circl.lu/api/last"
-            with urllib.request.urlopen(url, timeout=15) as response:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'}
+            req = urllib.request.Request(url, headers=headers)
+
+            with urllib.request.urlopen(req, timeout=15) as response:
                 if response.status == 200:
-                    data = json.loads(response.read().decode('utf-8'))
-                    q.put(('recent_threats_result', data))
+                    raw_data = response.read().decode('utf-8')
+                    if raw_data:
+                        data = json.loads(raw_data)
+                    else:
+                        logging.warning("Recent threats API returned empty response.")
                 else:
                     raise Exception(f"API request failed with status code {response.status}")
         except Exception as e:
             logging.error(f"Failed to fetch recent threats: {e}", exc_info=True)
-            q.put(('error', 'Threat Intelligence Error', str(e)))
+            q.put(('error', 'Threat Intelligence Error', f"Could not fetch data: {e}"))
         finally:
-            q.put(('tool_finished', 'fetch_threats'))
+            # Always put the result, even if it's an empty list.
+            # The UI handler will be responsible for displaying the "No results" message.
+            q.put(('recent_threats_result', data))
+            q.put(('tool_finished', 'fetch_threats', "cve.circl.lu", f"Fetched {len(data)} CVEs"))
 
     def _handle_recent_threats_result(self, data):
         """Handles the successful result from the threat fetcher thread."""
         self.recent_threats_data = data
         self.threats_current_page = 0
         self._update_threats_display()
-        self.status_bar.showMessage(f"Successfully fetched {len(data)} recent CVEs.", 5000)
+        if data:
+            self.status_bar.showMessage(f"Successfully fetched {len(data)} recent CVEs.", 5000)
+        else:
+            self.status_bar.showMessage("Could not fetch recent threats or none were found.", 5000)
 
     def _update_threats_display(self):
         """Updates the threat table and pagination controls based on the current state."""
@@ -2039,7 +2058,7 @@ class Zurvan(QMainWindow):
             logging.error(f"getsploit search failed: {e}", exc_info=True)
             q.put(('error', 'Exploit Search Error', str(e)))
         finally:
-            q.put(('tool_finished', 'exploit_search'))
+            q.put(('tool_finished', 'exploit_search', query, f"Found {len(results)} exploits."))
 
     def open_exploit_url(self, item, column):
         """Opens the selected exploit URL in the default web browser."""
@@ -6357,7 +6376,7 @@ class Zurvan(QMainWindow):
             logging.error(f"WhatWeb thread error: {e}", exc_info=True)
             q.put(('error', 'WhatWeb Error', str(e)))
         finally:
-            q.put(('tool_finished', 'whatweb_scan'))
+            q.put(('tool_finished', 'whatweb_scan', " ".join(command[1:]), "".join(full_output)))
             with self.thread_finish_lock:
                 self.whatweb_process = None
             logging.info("WhatWeb scan thread finished.")
@@ -8628,7 +8647,9 @@ class Zurvan(QMainWindow):
             sendp(pkt, iface=iface, count=count, inter=0.1, verbose=0)
             q.put(('deauth_status', "Deauth packets sent."))
         except Exception as e: logging.error("Exception in deauth thread", exc_info=True); q.put(('error',"Deauth Error",str(e)))
-        finally: q.put(('tool_finished','deauth')); logging.info("Deauth thread finished.")
+        finally:
+            q.put(('tool_finished','deauth', bssid, f"Sent {count} deauths to {client}"))
+            logging.info("Deauth thread finished.")
 
     def start_beacon_flood(self):
         if self.is_tool_running:
@@ -8752,7 +8773,7 @@ class Zurvan(QMainWindow):
             logging.error("Exception in beacon flood thread", exc_info=True)
             q.put(('error', "Beacon Flood Error", str(e)))
         finally:
-            q.put(('tool_finished', 'beacon_flood'))
+            q.put(('tool_finished', 'beacon_flood', iface, f"Flooded {len(ssids)} SSIDs"))
             logging.info("Beacon flood thread finished.")
 
     def _arp_spoof_thread(self, victim_ip, target_ip):
@@ -8786,7 +8807,7 @@ class Zurvan(QMainWindow):
             logging.error("Exception in ARP spoof thread", exc_info=True)
             q.put(('error', "ARP Spoof Error", str(e)))
         finally:
-            q.put(('tool_finished', 'arp_spoof'))
+            q.put(('tool_finished', 'arp_spoof', f"{victim_ip} -> {target_ip}", "ARP spoofing session"))
             logging.info("ARP spoof thread finished.")
 
     def start_arp_spoof(self):
@@ -9321,64 +9342,53 @@ class Zurvan(QMainWindow):
         self.active_threads.append(self.worker)
         self.worker.start()
 
-    def _start_cve_db_update(self):
-        """Starts the background thread to download/update the offline CVE database."""
+    def _show_cve_update_info(self):
+        QMessageBox.information(self, "Manual CVE Database Update",
+            "Automatic downloads from the National Vulnerability Database (NVD) are currently blocked by their security provider (Cloudflare).\n\n"
+            "To update the offline database, please follow these steps:\n"
+            "1. Go to the NVD Data Feeds page: https://nvd.nist.gov/vuln/data-feeds\n"
+            "2. Download the desired JSON feeds (e.g., 'nvdcve-1.1-modified.json.gz', 'nvdcve-1.1-2023.json.gz', etc.).\n"
+            "3. Return to this tab and click the 'Import NVD File' button.\n"
+            "4. Select the downloaded `.json.gz` file(s) to import them into the local database.")
+
+    def _start_cve_import(self):
+        """Starts the background thread to import local CVE files."""
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        self.is_tool_running = True
-        self.update_cve_db_btn.setEnabled(False)
-        self.status_bar.showMessage("Starting offline CVE database update...")
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select NVD JSON Feed(s)", "", "NVD JSON Files (*.json.gz)", options=QFileDialog.Option.DontUseNativeDialog)
+        if not file_paths:
+            return
 
-        self.worker = WorkerThread(self._update_cve_db_thread)
+        self.is_tool_running = True
+        self.import_cve_db_btn.setEnabled(False)
+        self.status_bar.showMessage("Starting CVE database import...")
+
+        self.worker = WorkerThread(self._cve_import_thread, args=(file_paths,))
         self.active_threads.append(self.worker)
         self.worker.start()
 
-    def _update_cve_db_thread(self):
-        """Worker thread to download and process NVD data feeds into a local SQLite DB."""
+    def _cve_import_thread(self, file_paths):
+        """Worker thread to process local NVD data feeds into the SQLite DB."""
         q = self.tool_results_queue
         db_path = "cve.db"
         try:
-            # Step 1: Setup Database
+            database.create_tables()
             con = sqlite3.connect(db_path)
             cur = con.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS vulnerabilities (
-                    cve_id TEXT PRIMARY KEY,
-                    description TEXT,
-                    cvss_v3_score REAL,
-                    cvss_v2_score REAL,
-                    keywords TEXT,
-                    published_date TEXT
-                )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_keywords ON vulnerabilities(keywords);")
-            con.commit()
 
-            # Step 2: Define URLs
-            current_year = datetime.now().year
-            base_url = "https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-{year}.json.gz"
-            urls = [base_url.format(year=y) for y in range(2002, current_year + 1)]
-            urls.append("https://nvd.nist.gov/feeds/json/cve/1.1/nvdcve-1.1-modified.json.gz")
-
-            total_files = len(urls)
-            # Step 3: Download and Process each file
-            for i, url in enumerate(urls):
+            total_files = len(file_paths)
+            for i, file_path in enumerate(file_paths):
                 if self.tool_stop_event.is_set():
-                    q.put(('status', "CVE DB update cancelled."))
+                    q.put(('status', "CVE import cancelled."))
                     break
 
-                filename = url.split('/')[-1]
-                q.put(('status', f"Downloading and processing file {i+1}/{total_files}: {filename}"))
+                filename = os.path.basename(file_path)
+                q.put(('status', f"Processing file {i+1}/{total_files}: {filename}"))
 
-                # Use a standard browser user-agent to avoid 403 Forbidden errors
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'}
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=60) as response:
-                    compressed_file = response.read()
-
-                json_data = gzip.decompress(compressed_file)
+                with gzip.open(file_path, 'rb') as f:
+                    json_data = f.read()
                 data = json.loads(json_data)
 
                 cve_items = data.get('CVE_Items', [])
@@ -9386,47 +9396,38 @@ class Zurvan(QMainWindow):
                 for cve_item in cve_items:
                     cve_id = cve_item['cve']['CVE_data_meta']['ID']
                     description = cve_item['cve']['description']['description_data'][0]['value']
-
-                    # Extract keywords from CPEs
                     keywords = set()
                     nodes = cve_item.get('configurations', {}).get('nodes', [])
                     for node in nodes:
                         cpe_matches = node.get('cpe_match', [])
                         for cpe_match in cpe_matches:
                             cpe_uri = cpe_match.get('cpe23Uri', '')
-                            # cpe:2.3:a:vendor:product:version:update:edition:language:sw_edition:target_sw:target_hw:other
                             parts = cpe_uri.split(':')
                             if len(parts) > 4:
-                                keywords.add(parts[3]) # vendor
-                                keywords.add(parts[4]) # product
-
+                                keywords.add(parts[3])
+                                keywords.add(parts[4])
                     keywords_str = " ".join(sorted(list(keywords)))
-
-                    # Extract CVSS scores
                     metrics_v3 = cve_item.get('impact', {}).get('baseMetricV3', {})
                     cvss_v3_score = metrics_v3.get('cvssV3', {}).get('baseScore')
                     metrics_v2 = cve_item.get('impact', {}).get('baseMetricV2', {})
                     cvss_v2_score = metrics_v2.get('cvssV2', {}).get('baseScore')
-
                     published_date = cve_item.get('publishedDate', '')
-
                     cves_to_insert.append((cve_id, description, cvss_v3_score, cvss_v2_score, keywords_str, published_date))
 
-                # Step 4: Insert into DB
                 cur.executemany("INSERT OR REPLACE INTO vulnerabilities VALUES (?, ?, ?, ?, ?, ?)", cves_to_insert)
                 con.commit()
                 q.put(('status', f"Finished processing {filename}. {len(cves_to_insert)} records updated."))
 
             if not self.tool_stop_event.is_set():
-                q.put(('status', "CVE Database update complete!"))
+                q.put(('status', "CVE Database import complete!"))
 
         except Exception as e:
-            logging.error(f"Failed to update offline CVE DB: {e}", exc_info=True)
+            logging.error(f"Failed to import offline CVE DB: {e}", exc_info=True)
             q.put(('error', 'CVE DB Error', str(e)))
         finally:
             if 'con' in locals() and con:
                 con.close()
-            q.put(('tool_finished', 'cve_db_update'))
+            q.put(('tool_finished', 'cve_import', ", ".join(file_paths), "Imported local CVE files."))
 
     def _query_local_cve_db(self, keyword):
         """Queries the local SQLite CVE database for a given keyword."""
@@ -9893,7 +9894,10 @@ class Zurvan(QMainWindow):
                     self.ps_status_label.setText("Ping sweep canceled.")
                 else:
                     self.ps_status_label.setText("Ping sweep complete.")
-                self.tool_results_queue.put(('tool_finished', 'ping_sweep'))
+
+                target = self.ps_target_edit.text()
+                results = f"Found {self.ps_tree.topLevelItemCount()} hosts."
+                self.tool_results_queue.put(('tool_finished', 'ping_sweep', target, results))
 
     def _handle_flood_thread_finished(self, total_threads):
         with self.thread_finish_lock:
@@ -9941,7 +9945,7 @@ class Zurvan(QMainWindow):
                    'deauth': self.deauth_button, 'arp_spoof': self.arp_spoof_start_btn,
                    'beacon_flood': self.bf_start_button, 'ping_sweep': self.ps_start_button, 'nmap_scan': self.nmap_controls['start_btn'],
                    'sublist3r_scan': self.subdomain_controls['start_btn'], 'subfinder_scan': self.subfinder_controls['start_btn'], 'httpx_scan': self.httpx_controls['start_btn'], 'trufflehog_scan': self.trufflehog_controls['start_btn'], 'rustscan_scan': self.rustscan_controls['start_btn'], 'dirsearch_scan': self.dirsearch_controls['start_btn'], 'ffuf_scan': self.ffuf_controls['start_btn'], 'jtr_scan': self.jtr_controls['start_btn'], 'hydra_scan': self.hydra_controls['start_btn'], 'enum4linux_ng_scan': self.enum4linux_ng_controls['start_btn'], 'dnsrecon_scan': self.dnsrecon_controls['start_btn'], 'fierce_scan': self.fierce_controls['start_btn'], 'sherlock_scan': self.sherlock_controls['start_btn'], 'spiderfoot_scan': self.spiderfoot_controls['start_btn'], 'arp_scan_cli_scan': self.arp_scan_cli_controls['start_btn'], 'wifite_scan': self.wifite_start_btn, 'nikto_scan': self.nikto_controls['start_btn'], 'gobuster_scan': self.gobuster_controls['start_btn'], 'sqlmap_scan': self.sqlmap_start_btn, 'whatweb_scan': self.whatweb_start_btn, 'hashcat_scan': self.hashcat_start_btn, 'masscan_scan': self.masscan_start_btn, 'nuclei_scan': self.nuclei_controls['start_btn'],
-                   'exploit_search': self.exploitdb_search_button, 'cve_db_update': self.update_cve_db_btn, 'fetch_threats': self.fetch_threats_btn}
+                   'exploit_search': self.exploitdb_search_button, 'cve_import': self.import_cve_db_btn, 'fetch_threats': self.fetch_threats_btn}
         cancel_buttons = {'scanner': self.scan_cancel_button, 'flooder': self.stop_flood_button,
                           'arp_spoof': self.arp_spoof_stop_btn, 'beacon_flood': self.bf_stop_button,
                           'ping_sweep': self.ps_cancel_button, 'fw_tester': self.fw_cancel_button,
@@ -10248,10 +10252,16 @@ class Zurvan(QMainWindow):
         self.report_aggregate_btn.clicked.connect(self._handle_aggregation)
         aggregation_controls.addWidget(self.report_aggregate_btn)
 
-        self.update_cve_db_btn = QPushButton(QIcon("icons/download-cloud.svg"), "Update Offline DB")
-        self.update_cve_db_btn.setToolTip("Download or update the offline CVE database from NVD. This may take a while.")
-        self.update_cve_db_btn.clicked.connect(self._start_cve_db_update)
+        self.import_cve_db_btn = QPushButton(QIcon("icons/folder.svg"), "Import NVD File")
+        self.import_cve_db_btn.setToolTip("Import a manually downloaded NVD JSON feed (*.json.gz).")
+        self.import_cve_db_btn.clicked.connect(self._start_cve_import)
+        aggregation_controls.addWidget(self.import_cve_db_btn)
+
+        self.update_cve_db_btn = QPushButton(QIcon("icons/download-cloud.svg"), "Update Offline DB (Info)")
+        self.update_cve_db_btn.setToolTip("Show instructions for manually updating the offline CVE database.")
+        self.update_cve_db_btn.clicked.connect(self._show_cve_update_info)
         aggregation_controls.addWidget(self.update_cve_db_btn)
+
 
         aggregation_controls.addStretch()
         self.offline_cve_check = QCheckBox("Use offline CVE_DB")
