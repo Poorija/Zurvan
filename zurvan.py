@@ -9395,17 +9395,17 @@ class Zurvan(QMainWindow):
             con = sqlite3.connect(db_path)
             cur = con.cursor()
 
-        # Create the vulnerabilities table if it doesn't exist.
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS vulnerabilities (
-                cve_id TEXT PRIMARY KEY,
-                description TEXT,
-                cvss_v3_score REAL,
-                cvss_v2_score REAL,
-                keywords TEXT,
-                published_date TEXT
-            )
-        """)
+            # Create the vulnerabilities table if it doesn't exist.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS vulnerabilities (
+                    cve_id TEXT PRIMARY KEY,
+                    description TEXT,
+                    cvss_v3_score REAL,
+                    cvss_v2_score REAL,
+                    keywords TEXT,
+                    published_date TEXT
+                )
+            """)
 
             total_files = len(file_paths)
             for i, file_path in enumerate(file_paths):
