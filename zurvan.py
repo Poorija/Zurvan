@@ -1277,7 +1277,7 @@ class Zurvan(QMainWindow):
             self.user_profile_button.setIcon(QIcon(pixmap))
         else:
             # Fallback to a default icon if no avatar is set
-            self.user_profile_button.setIcon(QIcon("icons/users.svg"))
+            self.user_profile_button.setIcon(QIcon("icons/Zurvan-mono.png"))
 
     def _show_user_menu(self):
         """Shows a context menu for the user profile button."""
@@ -9372,7 +9372,9 @@ class Zurvan(QMainWindow):
                 filename = url.split('/')[-1]
                 q.put(('status', f"Downloading and processing file {i+1}/{total_files}: {filename}"))
 
-                req = urllib.request.Request(url, headers={'User-Agent': 'GScapy/1.0'})
+                # Use a standard browser user-agent to avoid 403 Forbidden errors
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'}
+                req = urllib.request.Request(url, headers=headers)
                 with urllib.request.urlopen(req, timeout=60) as response:
                     compressed_file = response.read()
 
@@ -9938,8 +9940,8 @@ class Zurvan(QMainWindow):
                    'flooder': self.flood_button, 'fw_tester': self.fw_test_button, 'wifi_scan': self.wifi_scan_button,
                    'deauth': self.deauth_button, 'arp_spoof': self.arp_spoof_start_btn,
                    'beacon_flood': self.bf_start_button, 'ping_sweep': self.ps_start_button, 'nmap_scan': self.nmap_controls['start_btn'],
-                          'sublist3r_scan': self.subdomain_controls['start_btn'], 'subfinder_scan': self.subfinder_controls['start_btn'], 'httpx_scan': self.httpx_controls['start_btn'], 'trufflehog_scan': self.trufflehog_controls['start_btn'], 'rustscan_scan': self.rustscan_controls['start_btn'], 'dirsearch_scan': self.dirsearch_controls['start_btn'], 'ffuf_scan': self.ffuf_controls['start_btn'], 'jtr_scan': self.jtr_controls['start_btn'], 'hydra_scan': self.hydra_controls['start_btn'], 'enum4linux_ng_scan': self.enum4linux_ng_controls['start_btn'], 'dnsrecon_scan': self.dnsrecon_controls['start_btn'], 'fierce_scan': self.fierce_controls['start_btn'], 'sherlock_scan': self.sherlock_controls['start_btn'], 'spiderfoot_scan': self.spiderfoot_controls['start_btn'], 'arp_scan_cli_scan': self.arp_scan_cli_controls['start_btn'], 'wifite_scan': self.wifite_start_btn, 'nikto_scan': self.nikto_controls['start_btn'], 'gobuster_scan': self.gobuster_controls['start_btn'], 'sqlmap_scan': self.sqlmap_start_btn, 'whatweb_scan': self.whatweb_start_btn, 'hashcat_scan': self.hashcat_start_btn, 'masscan_scan': self.masscan_start_btn, 'nuclei_scan': self.nuclei_controls['start_btn'],
-                           'cve_search': self.cve_search_button, 'exploit_search': self.exploitdb_search_button, 'cve_db_update': self.update_cve_db_btn}
+                   'sublist3r_scan': self.subdomain_controls['start_btn'], 'subfinder_scan': self.subfinder_controls['start_btn'], 'httpx_scan': self.httpx_controls['start_btn'], 'trufflehog_scan': self.trufflehog_controls['start_btn'], 'rustscan_scan': self.rustscan_controls['start_btn'], 'dirsearch_scan': self.dirsearch_controls['start_btn'], 'ffuf_scan': self.ffuf_controls['start_btn'], 'jtr_scan': self.jtr_controls['start_btn'], 'hydra_scan': self.hydra_controls['start_btn'], 'enum4linux_ng_scan': self.enum4linux_ng_controls['start_btn'], 'dnsrecon_scan': self.dnsrecon_controls['start_btn'], 'fierce_scan': self.fierce_controls['start_btn'], 'sherlock_scan': self.sherlock_controls['start_btn'], 'spiderfoot_scan': self.spiderfoot_controls['start_btn'], 'arp_scan_cli_scan': self.arp_scan_cli_controls['start_btn'], 'wifite_scan': self.wifite_start_btn, 'nikto_scan': self.nikto_controls['start_btn'], 'gobuster_scan': self.gobuster_controls['start_btn'], 'sqlmap_scan': self.sqlmap_start_btn, 'whatweb_scan': self.whatweb_start_btn, 'hashcat_scan': self.hashcat_start_btn, 'masscan_scan': self.masscan_start_btn, 'nuclei_scan': self.nuclei_controls['start_btn'],
+                   'exploit_search': self.exploitdb_search_button, 'cve_db_update': self.update_cve_db_btn, 'fetch_threats': self.fetch_threats_btn}
         cancel_buttons = {'scanner': self.scan_cancel_button, 'flooder': self.stop_flood_button,
                           'arp_spoof': self.arp_spoof_stop_btn, 'beacon_flood': self.bf_stop_button,
                           'ping_sweep': self.ps_cancel_button, 'fw_tester': self.fw_cancel_button,

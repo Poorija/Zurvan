@@ -328,7 +328,7 @@ class LoginDialog(QDialog):
         self.lockout_widget = QWidget()
         lockout_layout = QHBoxLayout(self.lockout_widget)
         self.lockout_icon_label = QLabel()
-        self.lockout_icon_label.setPixmap(QIcon.fromTheme("dialog-error", QIcon("icons/Zurvan.png")).pixmap(24, 24))
+        self.lockout_icon_label.setPixmap(QIcon.fromTheme("dialog-error", QIcon("icons/Zurvan-mono.png")).pixmap(24, 24))
         self.lockout_label = QLabel()
         lockout_layout.addWidget(self.lockout_icon_label)
         lockout_layout.addWidget(self.lockout_label)
