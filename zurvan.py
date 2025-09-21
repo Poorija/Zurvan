@@ -9374,9 +9374,27 @@ class Zurvan(QMainWindow):
         q = self.tool_results_queue
         db_path = "cve.db"
         try:
-            database.create_tables()
+            # This thread manages its own database, so we create the table here.
             con = sqlite3.connect(db_path)
             cur = con.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS vulnerabilities (
+                    cve_id TEXT PRIMARY KEY,
+                    description TEXT,
+                    cvss_v3_score REAL,
+                    cvss_v2_score REAL,
+                    keywords TEXT,
+                    published_date TEXT
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_keywords ON vulnerabilities(keywords);")
+            con.commit()
+
+            # Diagnostic logging to check if table was created
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vulnerabilities';")
+            table_exists = cur.fetchone()
+            logging.info(f"DIAGNOSTIC: 'vulnerabilities' table exists after creation: {table_exists is not None}")
+
 
             total_files = len(file_paths)
             for i, file_path in enumerate(file_paths):
