@@ -265,6 +265,15 @@ def get_all_users():
     conn.close()
     return users
 
+def get_user_by_id(user_id):
+    """Retrieves a single user by their ID."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    user = cursor.fetchone()
+    conn.close()
+    return dict(user) if user else None
+
 def update_user_profile(user_id, full_name, age, job_title):
     """Updates the profile information for a given user."""
     conn = get_db_connection()
