@@ -88,7 +88,7 @@ from PyQt6.QtWidgets import (
 from ai_tab import AIAssistantTab, AISettingsDialog, AIGuideDialog
 from login import LoginDialog
 from admin_panel import AdminPanelDialog
-from user_profile import UserProfileDialog
+from user_profile import UserProfileDialog, create_circular_pixmap
 from PyQt6.QtCore import QObject, pyqtSignal, Qt, QThread, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSequentialAnimationGroup, QPoint, QSize
 from PyQt6.QtGui import QAction, QIcon, QFont, QTextCursor, QActionGroup
 
@@ -1268,13 +1268,17 @@ class Zurvan(QMainWindow):
     def _set_user_avatar(self):
         """Sets the user profile button icon based on the user's avatar."""
         if not self.current_user:
+            # Fallback for when no user is logged in
+            self.user_profile_button.setIcon(QIcon("icons/Zurvan-mono.png"))
             return
 
         avatar_data = self.current_user.get('avatar')
         if avatar_data:
-            pixmap = QPixmap()
-            pixmap.loadFromData(avatar_data)
-            self.user_profile_button.setIcon(QIcon(pixmap))
+            source_pixmap = QPixmap()
+            source_pixmap.loadFromData(avatar_data)
+            # Use the helper to create a circular pixmap
+            circular_pixmap = create_circular_pixmap(source_pixmap, 32)
+            self.user_profile_button.setIcon(QIcon(circular_pixmap))
         else:
             # Fallback to a default icon if no avatar is set
             self.user_profile_button.setIcon(QIcon("icons/Zurvan-mono.png"))
@@ -1570,6 +1574,17 @@ class Zurvan(QMainWindow):
 
         header_layout.addStretch()
 
+        # Tor Proxy Checkbox
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        header_layout.addWidget(separator)
+        self.tor_proxy_check = QCheckBox("Use Tor Proxy")
+        self.tor_proxy_check.setToolTip("Route supported tool traffic through the default Tor proxy (socks5://127.0.0.1:9050).\nUnsupported tools will be disabled.")
+        self.tor_proxy_check.toggled.connect(self._handle_tor_toggle)
+        header_layout.addWidget(self.tor_proxy_check)
+        header_layout.addStretch()
+
         # Theme Switcher
         header_layout.addWidget(QLabel("Theme:"))
         self.theme_combo = QComboBox()
@@ -1634,6 +1649,58 @@ class Zurvan(QMainWindow):
     def get_selected_iface(self):
         iface = self.iface_combo.currentText()
         return iface if iface != "Automatic" else None
+
+    def is_tor_enabled(self):
+        """Returns True if the Tor proxy checkbox is checked."""
+        return self.tor_proxy_check.isChecked()
+
+    def _check_tor_proxy(self):
+        """Checks if the Tor SOCKS proxy is available on the default port."""
+        try:
+            with socket.create_connection(("127.0.0.1", 9050), timeout=2):
+                logging.info("Successfully connected to Tor proxy at 127.0.0.1:9050.")
+                return True
+        except (socket.timeout, ConnectionRefusedError):
+            logging.warning("Could not connect to Tor proxy at 127.0.0.1:9050.")
+            return False
+
+    def _handle_tor_toggle(self, checked):
+        """Handles the logic when the 'Use Tor Proxy' checkbox is toggled."""
+        if checked:
+            if not self._check_tor_proxy():
+                QMessageBox.warning(self, "Tor Proxy Unavailable",
+                                    "Could not connect to the Tor proxy at socks5://127.0.0.1:9050.\n"
+                                    "Please ensure Tor is running and configured correctly.")
+                self.tor_proxy_check.setChecked(False) # Uncheck the box
+                return
+
+        self._update_tool_availability()
+
+    def _update_tool_availability(self):
+        """Enables or disables tool widgets based on Tor proxy compatibility."""
+        is_tor = self.is_tor_enabled()
+        tor_tooltip = "This tool does not support Tor proxying and has been disabled."
+
+        # List of start button widgets for incompatible tools
+        incompatible_buttons = [
+            self.start_sniff_btn, self.send_btn, self.scan_button, self.arp_scan_button,
+            self.trace_button, self.ps_start_button, self.fw_test_button, self.flood_button,
+            self.wifi_scan_button, self.deauth_button, self.bf_start_button, self.krack_start_btn,
+            self.wifite_start_btn, self.masscan_start_btn,
+            self.arp_scan_cli_controls['start_btn'],
+            self.nikto_controls['start_btn'],
+            self.rustscan_controls['start_btn'],
+            self.ffuf_controls['start_btn'],
+            self.hydra_controls['start_btn'],
+        ]
+
+        for button in incompatible_buttons:
+            # Also check if the button is part of a tool that might not be initialized yet
+            if hasattr(self, 'is_tool_running'):
+                 original_tooltip = button.toolTip()
+                 button.setEnabled(not is_tor)
+                 button.setToolTip(tor_tooltip if is_tor else original_tooltip)
+
 
     def _create_main_tabs(self):
         """Creates the main QTabWidget and adds all the tool tabs."""
@@ -2502,6 +2569,9 @@ class Zurvan(QMainWindow):
 
         command.extend(self._build_nmap_script_args())
 
+        if self.is_tor_enabled():
+            command.extend(["--proxy", "socks5://127.0.0.1:9050"])
+
         try:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".xml", encoding='utf-8') as tmp_xml:
                 self.nmap_xml_temp_file = tmp_xml.name
@@ -2622,10 +2692,9 @@ class Zurvan(QMainWindow):
                 self.nmap_process = None
             logging.info("Nmap scan thread finished.")
 
-    def _sublist3r_thread(self, domain):
+    def _sublist3r_thread(self, command, domain):
         """Worker thread to run the Sublist3r script."""
         q = self.tool_results_queue
-        command = ["python", "tools/sublist3r/sublist3r.py", "-d", domain]
         logging.info(f"Starting Sublist3r scan with command: {' '.join(command)}")
         q.put(('sublist3r_output', f"$ {' '.join(command)}\n\n"))
 
@@ -2782,6 +2851,9 @@ class Zurvan(QMainWindow):
 
         if output_file := controls['output_edit'].text().strip():
             command.extend(["-o", output_file])
+
+        if self.is_tor_enabled():
+            command.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -2959,6 +3031,9 @@ class Zurvan(QMainWindow):
 
         if controls['json_output_check'].isChecked():
             command.append("-json")
+
+        if self.is_tor_enabled():
+            command.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -3276,6 +3351,9 @@ class Zurvan(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "File Error", f"Could not create temporary file for dirsearch report: {e}")
             return
+
+        if self.is_tor_enabled():
+            command.extend(["--proxy", "socks5://127.0.0.1:9050"])
 
         command.append("--no-color")
 
@@ -4097,13 +4175,17 @@ class Zurvan(QMainWindow):
             QMessageBox.critical(self, "Input Error", "Please provide a domain to scan.")
             return
 
+        command = ["python", "tools/sublist3r/sublist3r.py", "-d", domain]
+        if self.is_tor_enabled():
+            command.extend(["--proxy", "127.0.0.1:9050"])
+
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
         controls['cancel_btn'].setEnabled(True)
         self.tool_stop_event.clear()
         self.sublist3r_output.clear()
 
-        self.worker = WorkerThread(self._sublist3r_thread, args=(domain,))
+        self.worker = WorkerThread(self._sublist3r_thread, args=(command, domain))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -4575,6 +4657,9 @@ class Zurvan(QMainWindow):
         if extra_opts := self.whatweb_extra_opts_edit.text().strip():
             command.extend(extra_opts.split())
 
+        if self.is_tor_enabled():
+            command.extend(["--proxy", "127.0.0.1:9050", "--proxy-type", "socks5"])
+
         # Target(s) must be last
         command.extend(target.split())
 
@@ -4835,6 +4920,9 @@ class Zurvan(QMainWindow):
         # --- Additional Options ---
         if extra_opts := self.sqlmap_extra_opts_edit.text().strip():
             command.extend(extra_opts.split())
+
+        if self.is_tor_enabled():
+            command.extend(["--proxy", "socks5://127.0.0.1:9050"])
 
         self.is_tool_running = True
         self.sqlmap_start_btn.setEnabled(False)
@@ -5299,6 +5387,9 @@ class Zurvan(QMainWindow):
 
         if controls['verbose_check'].isChecked():
             command.append("-v")
+
+        if self.is_tor_enabled():
+            command.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
         command.extend(["-nC", "-json"]) # Always disable color and enable JSON for parsing
 
@@ -5961,6 +6052,9 @@ class Zurvan(QMainWindow):
 
         if timeout := controls['timeout_edit'].text().strip():
             command.extend(["--timeout", timeout])
+
+        if self.is_tor_enabled():
+            command.extend(["--proxy", "socks5://127.0.0.1:9050"])
 
         try:
             # Create a temporary directory for sherlock to save its files
@@ -9420,27 +9514,35 @@ class Zurvan(QMainWindow):
                     json_data = f.read()
                 data = json.loads(json_data)
 
-                cve_items = data.get('CVE_Items', [])
+                # The NVD JSON format changed. The new root key is 'vulnerabilities'.
+                vulnerabilities = data.get('vulnerabilities', [])
                 cves_to_insert = []
-                for cve_item in cve_items:
-                    cve_id = cve_item['cve']['CVE_data_meta']['ID']
-                    description = cve_item['cve']['description']['description_data'][0]['value']
-                    keywords = set()
-                    nodes = cve_item.get('configurations', {}).get('nodes', [])
-                    for node in nodes:
-                        cpe_matches = node.get('cpe_match', [])
-                        for cpe_match in cpe_matches:
-                            cpe_uri = cpe_match.get('cpe23Uri', '')
-                            parts = cpe_uri.split(':')
-                            if len(parts) > 4:
-                                keywords.add(parts[3])
-                                keywords.add(parts[4])
-                    keywords_str = " ".join(sorted(list(keywords)))
-                    metrics_v3 = cve_item.get('impact', {}).get('baseMetricV3', {})
-                    cvss_v3_score = metrics_v3.get('cvssV3', {}).get('baseScore')
-                    metrics_v2 = cve_item.get('impact', {}).get('baseMetricV2', {})
-                    cvss_v2_score = metrics_v2.get('cvssV2', {}).get('baseScore')
-                    published_date = cve_item.get('publishedDate', '')
+                for item in vulnerabilities:
+                    cve = item.get('cve', {})
+                    cve_id = cve.get('id', 'N/A')
+
+                    # Get English description
+                    description = "No description available."
+                    for desc_item in cve.get('descriptions', []):
+                        if desc_item.get('lang') == 'en':
+                            description = desc_item.get('value', '')
+                            break
+
+                    # Get CVSS scores
+                    cvss_v3_score = None
+                    cvss_v2_score = None
+                    metrics = cve.get('metrics', {})
+                    if 'cvssMetricV31' in metrics:
+                        cvss_v3_score = metrics['cvssMetricV31'][0]['cvssData'].get('baseScore')
+                    elif 'cvssMetricV2' in metrics:
+                        cvss_v2_score = metrics['cvssMetricV2'][0]['cvssData'].get('baseScore')
+
+                    published_date = cve.get('published', '')
+
+                    # The old CPE-based keyword logic is broken with the new format.
+                    # Create a simplified keyword string from the description for now.
+                    keywords_str = ' '.join(re.findall(r'\w+', description.lower()))
+
                     cves_to_insert.append((cve_id, description, cvss_v3_score, cvss_v2_score, keywords_str, published_date))
 
                 cur.executemany("INSERT OR REPLACE INTO vulnerabilities VALUES (?, ?, ?, ?, ?, ?)", cves_to_insert)

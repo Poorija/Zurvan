@@ -328,6 +328,14 @@ def set_user_active_status(user_id, is_active):
     conn.commit()
     conn.close()
 
+def set_user_admin_status(user_id, is_admin):
+    """Updates the is_admin status for a given user."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET is_admin = ? WHERE id = ?", (int(is_admin), user_id))
+    conn.commit()
+    conn.close()
+
 def update_user_password(user_id, new_password):
     """Updates the password for a given user."""
     conn = get_db_connection()
