@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTreeWidget, QTreeWidgetItem, QPushButton, QHBoxLayout,
     QMessageBox, QInputDialog, QHeaderView, QGroupBox, QFormLayout, QLineEdit,
-    QSplitter, QWidget, QComboBox, QLabel
+    QSplitter, QWidget, QComboBox, QLabel, QTabWidget
 )
 from PyQt6.QtCore import Qt
 import database

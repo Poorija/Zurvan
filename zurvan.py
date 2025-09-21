@@ -1307,11 +1307,22 @@ class Zurvan(QMainWindow):
 
     def _logout(self):
         """Logs the current user out and shows the login screen."""
-        self.close()
-        # A bit of a hacky way to restart, but effective for a desktop app
-        # A more robust solution might use a dedicated controller class to manage windows
-        python = sys.executable
-        os.execl(python, python, *sys.argv)
+        reply = QMessageBox.question(self, 'Logout Confirmation',
+                                     "Are you sure you want to log out?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Stop background threads before restarting
+            logging.info("User confirmed logout. Stopping background threads.")
+            if self.sniffer_thread and self.sniffer_thread.isRunning(): self.sniffer_thread.stop()
+            if self.channel_hopper and self.channel_hopper.isRunning(): self.channel_hopper.stop()
+            if self.resource_monitor_thread and self.resource_monitor_thread.isRunning():
+                self.resource_monitor_thread.stop()
+
+            # A bit of a hacky way to restart, but effective for a desktop app
+            python = sys.executable
+            os.execl(python, python, *sys.argv)
 
     def _update_menu_bar(self):
         """Creates or updates the main menu bar based on the current user's role."""
@@ -10777,6 +10788,7 @@ def main():
         if window.current_user and 'username' in window.current_user:
             window.setWindowTitle(f"Welcome, {window.current_user['username']} - Zurvan + AI - The Modern Scapy Interface with AI")
         window._update_menu_bar() # Populate the menu now that we have a user
+        window._set_user_avatar() # Set avatar after user is loaded
         window.show()
         sys.exit(app.exec())
 
