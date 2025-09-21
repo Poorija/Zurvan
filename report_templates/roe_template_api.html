@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rules of Engagement - API Testing</title>
+    <style>
+        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; line-height: 1.6; margin: 20px; color: #333; }
+        h1, h2, h3 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 5px; }
+        h1 { text-align: center; }
+        .section { margin-bottom: 25px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background-color: #f9f9f9; }
+        .placeholder { color: #c0392b; font-style: italic; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        th { background-color: #ecf0f1; }
+        ul { padding-left: 20px; }
+        code { background-color: #ecf0f1; padding: 2px 4px; border-radius: 3px; font-family: monospace; }
+    </style>
+</head>
+<body>
+
+    <h1>Rules of Engagement (ROE)</h1>
+    <h2>API Security Assessment</h2>
+
+    <div class="section">
+        <h3>1. Parties & Authorization</h3>
+        <p>This document outlines the agreement for an API security assessment between <strong>{client_name}</strong> ("the Client") and <strong>{tester_name}</strong> ("the Tester"). The Client provides full authorization for testing the API endpoints specified in the scope.</p>
+    </div>
+
+    <div class="section">
+        <h3>2. Period of Performance</h3>
+        <p><strong>Start Date & Time:</strong> <span class="placeholder">{start_date_time}</span></p>
+        <p><strong>End Date & Time:</strong> <span class="placeholder">{end_date_time}</span></p>
+    </div>
+
+    <div class="section">
+        <h3>3. Scope of Testing</h3>
+        <h4>3.1. In-Scope API Endpoints</h4>
+        <p>The following API base URLs and documentation are in scope:</p>
+        <p><code><span class="placeholder">e.g., https://api.example.com/v1/</span></code></p>
+        <p>API Documentation (Swagger/OpenAPI): <code><span class="placeholder">{api_docs_url}</span></code></p>
+
+        <h4>3.2. Authentication</h4>
+        <p>The Client will provide the necessary authentication tokens/API keys for testing:</p>
+        <p><strong>Authentication Type:</strong> <span class="placeholder">e.g., Bearer Token, API Key, OAuth2</span></p>
+        <p><strong>Credentials/Tokens:</strong></p>
+        <pre><code class="placeholder">{provided_tokens_and_credentials}</code></pre>
+
+        <h4>3.3. Restrictions</h4>
+        <p>The following activities are explicitly forbidden:</p>
+        <ul>
+            <li>Load testing or any action that could be perceived as a Denial of Service (DoS) attack.</li>
+            <li>Testing against production user data. Any objects created should be clearly marked as test data (e.g., "GSCAPY_TEST_OBJECT").</li>
+            <li>Accessing or modifying accounts not explicitly provided for testing.</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h3>4. Methodology</h3>
+        <p>The Tester will follow the OWASP API Security Top 10, including tests for Broken Object Level Authorization, Broken User Authentication, Excessive Data Exposure, Lack of Resources & Rate Limiting, and Injection flaws.</p>
+    </div>
+
+    <div class="section">
+        <h3>5. Emergency Contacts</h3>
+        <p><strong>Client Contact:</strong> <span class="placeholder">{client_contact_name}, {client_contact_email}</span></p>
+        <p><strong>Tester Contact:</strong> <span class="placeholder">{tester_contact_name}, {tester_contact_email}</span></p>
+    </div>
+
+    <div class="section">
+        <h3>6. Agreement</h3>
+        <p>Signatures below indicate agreement to these terms.</p>
+        <br><br>
+        <table>
+            <tr>
+                <td><strong>For the Client:</strong><br><br>_________________________<br><strong>Name:</strong> <span class="placeholder">{client_representative_name}</span><br><strong>Date:</strong> <span class="placeholder">{agreement_date}</span></td>
+                <td><strong>For the Tester:</strong><br><br>_________________________<br><strong>Name:</strong> <span class="placeholder">{tester_representative_name}</span><br><strong>Date:</strong> <span class="placeholder">{agreement_date}</span></td>
+            </tr>
+        </table>
+    </div>
+</body>
+</html>

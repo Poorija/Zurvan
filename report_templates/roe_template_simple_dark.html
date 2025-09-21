@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rules of Engagement - Simple (Dark)</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; margin: 20px; background-color: #2c3e50; color: #ecf0f1; }
+        h1, h2 { color: #3498db; border-bottom: 1px solid #3498db; padding-bottom: 5px;}
+        .section { margin-bottom: 20px; background-color: #34495e; padding: 15px; border-radius: 5px; }
+        .placeholder { color: #e74c3c; font-style: italic; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Rules of Engagement (ROE)</h1>
+    <h2>Penetration Test Authorization</h2>
+
+    <div class="section">
+        <h3>1. Parties Involved</h3>
+        <p>This document outlines the agreement between <strong>{client_name}</strong> ("the Client") and <strong>{tester_name}</strong> ("the Tester").</p>
+    </div>
+
+    <div class="section">
+        <h3>2. Period of Performance</h3>
+        <p>The penetration testing activities will be conducted from <span class="placeholder">{start_date}</span> to <span class="placeholder">{end_date}</span>.</p>
+    </div>
+
+    <div class="section">
+        <h3>3. Scope of Testing</h3>
+        <h4>3.1. In-Scope Targets</h4>
+        <p>The following assets are explicitly included in the scope of this engagement:</p>
+        <div class="placeholder">{in_scope_targets}</div>
+
+        <h4>3.2. Out-of-Scope Targets</h4>
+        <p>The following assets are explicitly excluded from the scope of this engagement. No testing, intentional or otherwise, should be performed against these assets:</p>
+        <div class="placeholder">{out_of_scope_targets}</div>
+    </div>
+
+    <div class="section">
+        <h3>4. Emergency Contact Information</h3>
+        <p>In case of a critical finding or suspected service disruption, the Tester will immediately contact:</p>
+        <p><strong>Client Contact:</strong> <span class="placeholder">{client_contact_name}, {client_contact_email}, {client_contact_phone}</span></p>
+        <p><strong>Tester Contact:</strong> <span class="placeholder">{tester_contact_name}, {tester_contact_email}, {tester_contact_phone}</span></p>
+    </div>
+
+    <div class="section">
+        <h3>5. Authorization and Agreement</h3>
+        <p>By signing below, the Client authorizes the Tester to perform penetration testing activities as defined in this document.</p>
+        <br><br>
+        <p>_________________________</p>
+        <p><strong>Client Signature:</strong> <span class="placeholder">(Client Representative Name)</span></p>
+        <p><strong>Date:</strong> <span class="placeholder">{agreement_date}</span></p>
+    </div>
+</body>
+</html>

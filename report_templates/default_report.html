@@ -1,0 +1,38 @@
+<html>
+<head>
+    <title>GScapy Security Assessment Report</title>
+    <style>
+        body {{ font-family: sans-serif; margin: 2em; background-color: #f8f9fa; color: #212529; }}
+        h1, h2, h3 {{ color: #004085; border-bottom: 2px solid #b8daff; padding-bottom: 5px; }}
+        .container {{ max-width: 1200px; margin: auto; background: #fff; padding: 2em; box-shadow: 0 0 10px rgba(0,0,0,0.1); }}
+        .roe-grid {{ display: grid; grid-template-columns: 150px 1fr; gap: 10px 20px; margin-bottom: 2em;}}
+        .roe-grid dt {{ font-weight: bold; }}
+        .findings-table {{ border-collapse: collapse; width: 100%; margin-top: 1em; }}
+        .findings-table th, .findings-table td {{ border: 1px solid #dee2e6; padding: 8px; text-align: left; }}
+        .findings-table th {{ background-color: #e9ecef; }}
+        pre {{ white-space: pre-wrap; background-color: #e9ecef; padding: 1em; border-radius: 5px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Security Assessment Report</h1>
+        <h2>Rules of Engagement</h2>
+        <dl class="roe-grid">
+            <dt>Client:</dt><dd>{client}</dd>
+            <dt>Assessment Dates:</dt><dd>{dates}</dd>
+            <dt>Objectives:</dt><dd><pre>{objectives}</pre></dd>
+            <dt>In-Scope Targets:</dt><dd><pre>{in_scope}</pre></dd>
+            <dt>Out-of-Scope:</dt><dd><pre>{out_of_scope}</pre></dd>
+        </dl>
+
+        <h2>Executive Summary</h2>
+        <p>{summary}</p>
+
+        <h2>Technical Findings</h2>
+        <table class="findings-table">
+            <tr><th>Host</th><th>Service</th><th>Finding</th><th>Details (CVEs/Exploits)</th></tr>
+            {findings_loop}
+        </table>
+    </div>
+</body>
+</html>
