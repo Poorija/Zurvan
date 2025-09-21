@@ -156,7 +156,7 @@ class PasswordResetDialog(QDialog):
 class LoginDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("GScapy - Login")
+        self.setWindowTitle("Zurvan - Login")
         self.setModal(True)
         self.current_user = None
         self.selected_theme = 'dark_cyan.xml' # Default theme
@@ -178,7 +178,7 @@ class LoginDialog(QDialog):
         # Logo
         self.logo_label = QLabel()
         script_dir = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(script_dir, "icons", "new_logo.png")
+        icon_path = os.path.join(script_dir, "icons", "Zurvan.png")
         pixmap = QPixmap(icon_path)
         self.logo_label.setPixmap(pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         header_layout.addWidget(self.logo_label)
@@ -190,7 +190,7 @@ class LoginDialog(QDialog):
         text_layout.setSpacing(0)
 
         # App Name
-        app_name_label = QLabel("GScapy + AI")
+        app_name_label = QLabel("Zurvan + AI")
         app_name_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #bbbbbb;")
         app_name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         text_layout.addWidget(app_name_label)
@@ -249,7 +249,7 @@ class LoginDialog(QDialog):
     def _handle_theme_change(self, theme_name):
         """Applies the selected theme to the entire application."""
         self.selected_theme = f"{theme_name}.xml"
-        # This dictionary should be kept in sync with the one in gscapy.py
+        # This dictionary should be kept in sync with the one in zurvan.py
         extra_qss = {
             'QGroupBox': {
                 'border': '1px solid #444;',
@@ -328,7 +328,7 @@ class LoginDialog(QDialog):
         self.lockout_widget = QWidget()
         lockout_layout = QHBoxLayout(self.lockout_widget)
         self.lockout_icon_label = QLabel()
-        self.lockout_icon_label.setPixmap(QIcon.fromTheme("dialog-error", QIcon("icons/new_logo.png")).pixmap(24, 24))
+        self.lockout_icon_label.setPixmap(QIcon.fromTheme("dialog-error", QIcon("icons/Zurvan.png")).pixmap(24, 24))
         self.lockout_label = QLabel()
         lockout_layout.addWidget(self.lockout_icon_label)
         lockout_layout.addWidget(self.lockout_label)
