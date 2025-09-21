@@ -9214,6 +9214,20 @@ class Zurvan(QMainWindow):
         self.result_handlers['masscan_output'] = self._handle_masscan_output
         self.result_handlers['report_finding'] = self._handle_report_finding
         self.result_handlers['recent_threats_result'] = self._handle_recent_threats_result
+        self.result_handlers['cve_import_finished'] = self._handle_cve_import_finished
+
+    def _handle_cve_import_finished(self, success, total_records, error_message):
+        """Shows a confirmation message after the CVE import process is complete."""
+        if success:
+            QMessageBox.information(self, "Import Successful",
+                f"Successfully imported {total_records} records into the offline CVE database.\n\n"
+                "This database is used by the 'Aggregate & Enrich Results' feature on the Reporting tab when the 'Use offline CVE_DB' checkbox is enabled.")
+        else:
+            QMessageBox.critical(self, "Import Failed",
+                f"The CVE import process failed with an error:\n\n{error_message}\n\n"
+                "Please check the log for more details.")
+        # Reset the status label
+        self.cve_import_status_label.setText("Status: Idle")
 
     def _handle_report_finished(self, success, message):
         """Handles the result of the report generation thread."""
@@ -9373,37 +9387,23 @@ class Zurvan(QMainWindow):
         """Worker thread to process local NVD data feeds into the SQLite DB."""
         q = self.tool_results_queue
         db_path = "cve.db"
+        total_records = 0
+        success = True
+        error_message = ""
+
         try:
-            # This thread manages its own database, so we create the table here.
+            database.create_tables()
             con = sqlite3.connect(db_path)
             cur = con.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS vulnerabilities (
-                    cve_id TEXT PRIMARY KEY,
-                    description TEXT,
-                    cvss_v3_score REAL,
-                    cvss_v2_score REAL,
-                    keywords TEXT,
-                    published_date TEXT
-                )
-            """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_keywords ON vulnerabilities(keywords);")
-            con.commit()
-
-            # Diagnostic logging to check if table was created
-            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='vulnerabilities';")
-            table_exists = cur.fetchone()
-            logging.info(f"DIAGNOSTIC: 'vulnerabilities' table exists after creation: {table_exists is not None}")
-
 
             total_files = len(file_paths)
             for i, file_path in enumerate(file_paths):
                 if self.tool_stop_event.is_set():
-                    q.put(('status', "CVE import cancelled."))
+                    q.put(('cve_import_status', "CVE import cancelled."))
                     break
 
                 filename = os.path.basename(file_path)
-                q.put(('status', f"Processing file {i+1}/{total_files}: {filename}"))
+                q.put(('cve_import_status', f"Processing file {i+1}/{total_files}: {filename}"))
 
                 with gzip.open(file_path, 'rb') as f:
                     json_data = f.read()
@@ -9434,18 +9434,19 @@ class Zurvan(QMainWindow):
 
                 cur.executemany("INSERT OR REPLACE INTO vulnerabilities VALUES (?, ?, ?, ?, ?, ?)", cves_to_insert)
                 con.commit()
-                q.put(('status', f"Finished processing {filename}. {len(cves_to_insert)} records updated."))
-
-            if not self.tool_stop_event.is_set():
-                q.put(('status', "CVE Database import complete!"))
+                total_records += len(cves_to_insert)
+                q.put(('cve_import_status', f"Finished processing {filename}. {len(cves_to_insert)} records updated."))
 
         except Exception as e:
+            success = False
+            error_message = str(e)
             logging.error(f"Failed to import offline CVE DB: {e}", exc_info=True)
             q.put(('error', 'CVE DB Error', str(e)))
         finally:
             if 'con' in locals() and con:
                 con.close()
-            q.put(('tool_finished', 'cve_import', ", ".join(file_paths), "Imported local CVE files."))
+            q.put(('cve_import_finished', success, total_records, error_message))
+            q.put(('tool_finished', 'cve_import', ", ".join(file_paths), f"Imported {total_records} records."))
 
     def _query_local_cve_db(self, keyword):
         """Queries the local SQLite CVE database for a given keyword."""
@@ -9877,7 +9878,7 @@ class Zurvan(QMainWindow):
         widgets = {'trace': self.trace_status, 'scan': self.scan_status, 'arp': self.arp_status,
                    'flood': self.flood_status, 'fw': self.fw_status, 'wifi_scan': self.wifi_scan_status,
                    'deauth': self.deauth_status, 'arp_spoof': self.arp_spoof_status,
-                   'bf': self.bf_status_label, 'ps': self.ps_status_label}
+                   'bf': self.bf_status_label, 'ps': self.ps_status_label, 'cve_import': self.cve_import_status_label}
         if tool_name in widgets:
             widgets[tool_name].setText(status_text)
 
@@ -10279,8 +10280,6 @@ class Zurvan(QMainWindow):
         self.update_cve_db_btn.setToolTip("Show instructions for manually updating the offline CVE database.")
         self.update_cve_db_btn.clicked.connect(self._show_cve_update_info)
         aggregation_controls.addWidget(self.update_cve_db_btn)
-
-
         aggregation_controls.addStretch()
         self.offline_cve_check = QCheckBox("Use offline CVE_DB")
         self.offline_cve_check.setToolTip("Use a local copy of CVE data for enrichment. Requires initial download.")
@@ -10293,6 +10292,10 @@ class Zurvan(QMainWindow):
         self.report_findings_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.report_findings_tree.header().setStretchLastSection(True)
         findings_layout.addWidget(self.report_findings_tree)
+
+        self.cve_import_status_label = QLabel("Status: Idle")
+        findings_layout.addWidget(self.cve_import_status_label)
+
         right_layout.addWidget(findings_box)
 
         # Generation Box
