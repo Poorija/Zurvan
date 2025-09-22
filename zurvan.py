@@ -9467,7 +9467,6 @@ class Zurvan(QMainWindow):
             'cve_result': self._handle_cve_result,
             'exploit_search_status': self._handle_exploit_search_status,
             'exploit_search_results': self._handle_exploit_search_results,
-            'cve_import_status': self.cve_import_status_changed.emit,
             '_status': self._handle_status_update,
             '_clear': self._handle_clear_update,
             '_result': self._handle_result_update,
@@ -9684,28 +9683,67 @@ class Zurvan(QMainWindow):
                     json_data = f.read()
                 data = json.loads(json_data)
 
-                cve_items = data.get('CVE_Items', [])
                 cves_to_insert = []
-                for cve_item in cve_items:
-                    cve_id = cve_item['cve']['CVE_data_meta']['ID']
-                    description = cve_item['cve']['description']['description_data'][0]['value']
-                    keywords = set()
-                    nodes = cve_item.get('configurations', {}).get('nodes', [])
-                    for node in nodes:
-                        cpe_matches = node.get('cpe_match', [])
-                        for cpe_match in cpe_matches:
-                            cpe_uri = cpe_match.get('cpe23Uri', '')
-                            parts = cpe_uri.split(':')
-                            if len(parts) > 4:
-                                keywords.add(parts[3])
-                                keywords.add(parts[4])
-                    keywords_str = " ".join(sorted(list(keywords)))
-                    metrics_v3 = cve_item.get('impact', {}).get('baseMetricV3', {})
-                    cvss_v3_score = metrics_v3.get('cvssV3', {}).get('baseScore')
-                    metrics_v2 = cve_item.get('impact', {}).get('baseMetricV2', {})
-                    cvss_v2_score = metrics_v2.get('cvssV2', {}).get('baseScore')
-                    published_date = cve_item.get('publishedDate', '')
-                    cves_to_insert.append((cve_id, description, cvss_v3_score, cvss_v2_score, keywords_str, published_date))
+
+                # Check for NVD JSON 2.0 format vs 1.1
+                if 'vulnerabilities' in data:
+                    # NVD 2.0 Format Parsing
+                    for cve_item in data.get('vulnerabilities', []):
+                        cve_data = cve_item.get('cve', {})
+                        cve_id = cve_data.get('id', 'N/A')
+
+                        description = "No description available."
+                        for desc in cve_data.get('descriptions', []):
+                            if desc.get('lang') == 'en':
+                                description = desc.get('value', '')
+                                break
+
+                        cvss_v3_score = None
+                        if 'cvssMetricV31' in cve_data.get('metrics', {}):
+                            cvss_v3_score = cve_data['metrics']['cvssMetricV31'][0]['cvssData'].get('baseScore')
+
+                        cvss_v2_score = None
+                        if 'cvssMetricV2' in cve_data.get('metrics', {}):
+                             cvss_v2_score = cve_data['metrics']['cvssMetricV2'][0]['cvssData'].get('baseScore')
+
+                        published_date = cve_data.get('published', '')
+
+                        # Keyword extraction for 2.0 is more complex, involving CPEs
+                        keywords = set()
+                        configs = cve_data.get('configurations', [])
+                        for config in configs:
+                            for node in config.get('nodes', []):
+                                for cpe_match in node.get('cpeMatch', []):
+                                    cpe_uri = cpe_match.get('criteria', '')
+                                    parts = cpe_uri.split(':')
+                                    if len(parts) > 4:
+                                        keywords.add(parts[3]) # vendor
+                                        keywords.add(parts[4]) # product
+                        keywords_str = " ".join(sorted(list(keywords)))
+
+                        cves_to_insert.append((cve_id, description, cvss_v3_score, cvss_v2_score, keywords_str, published_date))
+                else:
+                    # Fallback to NVD 1.1 Format Parsing
+                    for cve_item in data.get('CVE_Items', []):
+                        cve_id = cve_item['cve']['CVE_data_meta']['ID']
+                        description = cve_item['cve']['description']['description_data'][0]['value']
+                        keywords = set()
+                        nodes = cve_item.get('configurations', {}).get('nodes', [])
+                        for node in nodes:
+                            cpe_matches = node.get('cpe_match', [])
+                            for cpe_match in cpe_matches:
+                                cpe_uri = cpe_match.get('cpe23Uri', '')
+                                parts = cpe_uri.split(':')
+                                if len(parts) > 4:
+                                    keywords.add(parts[3])
+                                    keywords.add(parts[4])
+                        keywords_str = " ".join(sorted(list(keywords)))
+                        metrics_v3 = cve_item.get('impact', {}).get('baseMetricV3', {})
+                        cvss_v3_score = metrics_v3.get('cvssV3', {}).get('baseScore')
+                        metrics_v2 = cve_item.get('impact', {}).get('baseMetricV2', {})
+                        cvss_v2_score = metrics_v2.get('cvssV2', {}).get('baseScore')
+                        published_date = cve_item.get('publishedDate', '')
+                        cves_to_insert.append((cve_id, description, cvss_v3_score, cvss_v2_score, keywords_str, published_date))
 
                 cur.executemany("INSERT OR REPLACE INTO vulnerabilities VALUES (?, ?, ?, ?, ?, ?)", cves_to_insert)
                 con.commit()
@@ -10290,7 +10328,7 @@ class Zurvan(QMainWindow):
                    'deauth': self.deauth_button, 'arp_spoof': self.arp_spoof_start_btn,
                    'beacon_flood': self.bf_start_button, 'ping_sweep': self.ps_start_button, 'nmap_scan': self.nmap_controls['start_btn'],
                    'sublist3r_scan': self.subdomain_controls['start_btn'], 'subfinder_scan': self.subfinder_controls['start_btn'], 'httpx_scan': self.httpx_controls['start_btn'], 'trufflehog_scan': self.trufflehog_controls['start_btn'], 'rustscan_scan': self.rustscan_controls['start_btn'], 'dirsearch_scan': self.dirsearch_controls['start_btn'], 'ffuf_scan': self.ffuf_controls['start_btn'], 'jtr_scan': self.jtr_controls['start_btn'], 'hydra_scan': self.hydra_controls['start_btn'], 'enum4linux_ng_scan': self.enum4linux_ng_controls['start_btn'], 'dnsrecon_scan': self.dnsrecon_controls['start_btn'], 'fierce_scan': self.fierce_controls['start_btn'], 'sherlock_scan': self.sherlock_controls['start_btn'], 'spiderfoot_scan': self.spiderfoot_controls['start_btn'], 'arp_scan_cli_scan': self.arp_scan_cli_controls['start_btn'], 'wifite_scan': self.wifite_start_btn, 'nikto_scan': self.nikto_controls['start_btn'], 'gobuster_scan': self.gobuster_controls['start_btn'], 'sqlmap_scan': self.sqlmap_start_btn, 'whatweb_scan': self.whatweb_start_btn, 'hashcat_scan': self.hashcat_start_btn, 'masscan_scan': self.masscan_start_btn, 'nuclei_scan': self.nuclei_controls['start_btn'],
-                   'exploit_search': self.exploitdb_search_button, 'cve_import': self.import_cve_db_btn, 'fetch_threats': self.fetch_threats_btn}
+                   'exploit_search': self.exploitdb_search_button, 'fetch_threats': self.fetch_threats_btn}
         cancel_buttons = {'scanner': self.scan_cancel_button, 'flooder': self.stop_flood_button,
                           'arp_spoof': self.arp_spoof_stop_btn, 'beacon_flood': self.bf_stop_button,
                           'ping_sweep': self.ps_cancel_button, 'fw_tester': self.fw_cancel_button,
