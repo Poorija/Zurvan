@@ -1,10 +1,11 @@
 import sys
 import random
 import os
+import re
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QStackedWidget, QFormLayout, QMessageBox, QGroupBox, QComboBox,
-    QGraphicsOpacityEffect, QCheckBox
+    QGraphicsOpacityEffect, QCheckBox, QProgressBar
 )
 from qt_material import apply_stylesheet, list_themes
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
@@ -49,6 +50,22 @@ class PasswordResetDialog(QDialog):
 
         self.adjustSize()
 
+    def _create_password_field_with_toggle(self, parent_layout):
+        """Helper to create a password field with a visibility toggle."""
+        password_edit = QLineEdit()
+        password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+
+        toggle_checkbox = QCheckBox("Show")
+        toggle_checkbox.stateChanged.connect(
+            lambda state, edit=password_edit: edit.setEchoMode(QLineEdit.EchoMode.Normal if state == Qt.CheckState.Checked.value else QLineEdit.EchoMode.Password)
+        )
+
+        field_layout = QHBoxLayout()
+        field_layout.addWidget(password_edit)
+        field_layout.addWidget(toggle_checkbox)
+
+        return password_edit, field_layout
+
     def _create_identifier_page(self):
         page = QWidget()
         layout = QFormLayout(page)
@@ -70,12 +87,12 @@ class PasswordResetDialog(QDialog):
     def _create_new_password_page(self):
         page = QWidget()
         layout = QFormLayout(page)
-        self.new_pass_edit = QLineEdit()
-        self.new_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.confirm_pass_edit = QLineEdit()
-        self.confirm_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addRow("New Password:", self.new_pass_edit)
-        layout.addRow("Confirm Password:", self.confirm_pass_edit)
+
+        self.new_pass_edit, new_pass_layout = self._create_password_field_with_toggle(layout)
+        self.confirm_pass_edit, confirm_pass_layout = self._create_password_field_with_toggle(layout)
+
+        layout.addRow("New Password:", new_pass_layout)
+        layout.addRow("Confirm Password:", confirm_pass_layout)
 
         reset_btn = QPushButton("Reset Password")
         reset_btn.clicked.connect(self._handle_set_new_password)
@@ -180,7 +197,7 @@ class LoginDialog(QDialog):
         script_dir = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(script_dir, "icons", "Zurvan.png")
         pixmap = QPixmap(icon_path)
-        self.logo_label.setPixmap(pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.logo_label.setPixmap(pixmap.scaled(150, 150, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         header_layout.addWidget(self.logo_label)
 
         # Text container
@@ -191,13 +208,13 @@ class LoginDialog(QDialog):
 
         # App Name
         app_name_label = QLabel("Zurvan + AI")
-        app_name_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #bbbbbb;")
+        app_name_label.setStyleSheet("font-size: 32px; font-weight: bold; color: #bbbbbb;")
         app_name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         text_layout.addWidget(app_name_label)
 
         # Slogan
         slogan_label = QLabel("The Modern Scapy Interface with AI")
-        slogan_label.setStyleSheet("font-size: 14px; color: #888888;")
+        slogan_label.setStyleSheet("font-size: 16px; color: #888888;")
         slogan_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         text_layout.addWidget(slogan_label)
 
@@ -212,9 +229,6 @@ class LoginDialog(QDialog):
 
         # Make the stacked widget blend in
         self.stacked_widget.setStyleSheet("QStackedWidget { background-color: transparent; }")
-
-        self.login_page = self._create_login_page()
-        self.register_page = self._create_register_page()
 
         # Create all pages first
         self.login_page = self._create_login_page()
@@ -240,6 +254,70 @@ class LoginDialog(QDialog):
         # --- Animation & Initial State ---
         self.start_logo_animation()
         self._refresh_captcha() # Load the first captcha
+
+    def _create_password_field_with_toggle(self, parent_layout):
+        """Helper to create a password field with a visibility toggle."""
+        password_edit = QLineEdit()
+        password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+
+        toggle_checkbox = QCheckBox("Show")
+        toggle_checkbox.stateChanged.connect(
+            lambda state, edit=password_edit: edit.setEchoMode(QLineEdit.EchoMode.Normal if state == Qt.CheckState.Checked.value else QLineEdit.EchoMode.Password)
+        )
+
+        field_layout = QHBoxLayout()
+        field_layout.addWidget(password_edit)
+        field_layout.addWidget(toggle_checkbox)
+
+        return password_edit, field_layout
+
+    def _update_password_strength(self, password):
+        """Checks password complexity and updates the progress bar and label."""
+        score = 0
+        feedback = []
+
+        # Rule 1: Length >= 8
+        if len(password) >= 8:
+            score += 1
+            feedback.append("✓ Length (8+)")
+        else:
+            feedback.append("✗ Length (8+)")
+
+        # Rule 2: Contains a number
+        if re.search(r"\d", password):
+            score += 1
+            feedback.append("✓ Number")
+        else:
+            feedback.append("✗ Number")
+
+        # Rule 3: Contains a special character
+        if re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+            score += 1
+            feedback.append("✓ Special Char")
+        else:
+            feedback.append("✗ Special Char")
+
+        # Rule 4: Contains upper and lower case
+        if re.search(r"[a-z]", password) and re.search(r"[A-Z]", password):
+            score += 1
+            feedback.append("✓ Aa Case")
+        else:
+            feedback.append("✗ Aa Case")
+
+        self.password_strength_bar.setValue(score)
+        self.password_strength_label.setText(" | ".join(feedback))
+
+        # Update progress bar color based on score
+        if score <= 1:
+            style = "QProgressBar::chunk { background-color: #d9534f; }" # Red
+        elif score == 2:
+            style = "QProgressBar::chunk { background-color: #f0ad4e; }" # Orange
+        elif score == 3:
+            style = "QProgressBar::chunk { background-color: #5bc0de; }" # Blue
+        else: # score == 4
+            style = "QProgressBar::chunk { background-color: #5cb85c; }" # Green
+        self.password_strength_bar.setStyleSheet(style)
+        return score == 4 # Return True if all rules are met
 
     def _handle_password_reset_request(self):
         """Opens the password reset dialog."""
@@ -336,11 +414,10 @@ class LoginDialog(QDialog):
         self.login_form_layout.addRow(self.lockout_widget)
 
         self.login_username_edit = QLineEdit()
-        self.login_password_edit = QLineEdit()
-        self.login_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.login_password_edit, login_password_layout = self._create_password_field_with_toggle(self.login_form_layout)
 
         self.login_form_layout.addRow("Username:", self.login_username_edit)
-        self.login_form_layout.addRow("Password:", self.login_password_edit)
+        self.login_form_layout.addRow("Password:", login_password_layout)
 
         # --- Captcha ---
         self.captcha_image_label = QLabel("Captcha loading...")
@@ -397,15 +474,29 @@ class LoginDialog(QDialog):
 
         self.reg_username_edit = QLineEdit()
         self.reg_email_edit = QLineEdit()
-        self.reg_password_edit = QLineEdit()
-        self.reg_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.reg_confirm_password_edit = QLineEdit()
-        self.reg_confirm_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+
+        self.reg_password_edit, reg_password_layout = self._create_password_field_with_toggle(form_layout)
+        self.reg_confirm_password_edit, reg_confirm_password_layout = self._create_password_field_with_toggle(form_layout)
 
         form_layout.addRow("Username:", self.reg_username_edit)
         form_layout.addRow("Email:", self.reg_email_edit)
-        form_layout.addRow("Password:", self.reg_password_edit)
-        form_layout.addRow("Confirm Password:", self.reg_confirm_password_edit)
+        form_layout.addRow("Password:", reg_password_layout)
+
+        # --- Password Strength Meter ---
+        self.password_strength_bar = QProgressBar()
+        self.password_strength_bar.setMaximum(4)
+        self.password_strength_bar.setTextVisible(False)
+        self.password_strength_label = QLabel("✗ Length (8+) | ✗ Number | ✗ Special Char | ✗ Aa Case")
+        self.password_strength_label.setStyleSheet("font-size: 10px; color: #aaa;")
+
+        strength_layout = QVBoxLayout()
+        strength_layout.addWidget(self.password_strength_bar)
+        strength_layout.addWidget(self.password_strength_label)
+        form_layout.addRow(strength_layout)
+
+        self.reg_password_edit.textChanged.connect(self._update_password_strength)
+
+        form_layout.addRow("Confirm Password:", reg_confirm_password_layout)
 
         # --- Security Questions ---
         self.security_questions_widgets = []
@@ -429,9 +520,9 @@ class LoginDialog(QDialog):
         self._set_initial_questions()
         form_layout.addRow(questions_box)
 
-        register_button = QPushButton("Register")
-        register_button.clicked.connect(self._handle_register)
-        form_layout.addRow(register_button)
+        self.register_button = QPushButton("Register")
+        self.register_button.clicked.connect(self._handle_register)
+        form_layout.addRow(self.register_button)
 
         back_to_login_link = QLabel("<a href='#'>Back to Login</a>")
         back_to_login_link.linkActivated.connect(lambda: self.stacked_widget.setCurrentWidget(self.login_page_stack))
@@ -551,9 +642,8 @@ class LoginDialog(QDialog):
         admin_box.setStyleSheet("QGroupBox { border: 1px solid #ccaa00; padding: 15px; }")
         form_layout = QFormLayout(admin_box)
 
-        self.admin_password_edit = QLineEdit()
-        self.admin_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        form_layout.addRow("Admin Password:", self.admin_password_edit)
+        self.admin_password_edit, admin_password_layout = self._create_password_field_with_toggle(form_layout)
+        form_layout.addRow("Admin Password:", admin_password_layout)
 
         admin_login_btn = QPushButton("Login as Admin")
         admin_login_btn.clicked.connect(self._handle_admin_login)
@@ -637,6 +727,9 @@ class LoginDialog(QDialog):
         if database.check_username_or_email_exists(username, email):
             QMessageBox.warning(self, "Input Error", "Username or email already exists.")
             return
+        if not self._update_password_strength(password):
+            QMessageBox.warning(self, "Weak Password", "Password does not meet the complexity requirements.")
+            return
 
         # Security questions validation
         questions_with_answers = []
@@ -658,7 +751,20 @@ class LoginDialog(QDialog):
             user_id = database.create_user(username, email, password)
             database.add_security_questions(user_id, questions_with_answers)
             QMessageBox.information(self, "Success", "Account created successfully! Please log in.")
-            self.stacked_widget.setCurrentWidget(self.login_page)
+
+            # Clear registration form and pre-fill login details
+            self.login_username_edit.setText(username)
+            self.login_password_edit.clear()
+            self.reg_username_edit.clear()
+            self.reg_email_edit.clear()
+            self.reg_password_edit.clear()
+            self.reg_confirm_password_edit.clear()
+            for item in self.security_questions_widgets:
+                item['answer'].clear()
+            self._refresh_captcha()
+            self.captcha_input_edit.clear()
+
+            self.stacked_widget.setCurrentWidget(self.login_page_stack)
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"An error occurred during registration: {e}")
 

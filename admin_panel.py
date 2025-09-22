@@ -51,8 +51,10 @@ class AdminPanelDialog(QDialog):
         actions_box = QGroupBox("User Actions")
         actions_layout = QVBoxLayout(actions_box)
         self.toggle_active_btn = QPushButton("Enable/Disable User")
+        self.toggle_admin_btn = QPushButton("Grant/Revoke Admin")
         self.reset_password_btn = QPushButton("Reset User Password")
         actions_layout.addWidget(self.toggle_active_btn)
+        actions_layout.addWidget(self.toggle_admin_btn)
         actions_layout.addWidget(self.reset_password_btn)
         actions_layout.addStretch()
         bottom_layout.addWidget(actions_box)
@@ -88,6 +90,7 @@ class AdminPanelDialog(QDialog):
 
         # --- Connect signals ---
         self.toggle_active_btn.clicked.connect(self._toggle_user_active_status)
+        self.toggle_admin_btn.clicked.connect(self._toggle_user_admin_status)
         self.reset_password_btn.clicked.connect(self._reset_user_password)
         self.save_profile_btn.clicked.connect(self._save_profile)
         self.refresh_btn.clicked.connect(self._populate_users)
@@ -197,6 +200,7 @@ class AdminPanelDialog(QDialog):
     def _set_editing_widgets_enabled(self, enabled):
         """Enables or disables all the user editing widgets."""
         self.toggle_active_btn.setEnabled(enabled)
+        self.toggle_admin_btn.setEnabled(enabled)
         self.reset_password_btn.setEnabled(enabled)
         self.username_edit.setEnabled(enabled)
         self.email_edit.setEnabled(enabled)
@@ -262,9 +266,10 @@ class AdminPanelDialog(QDialog):
         self.username_edit.setText(username)
         self.email_edit.setText(email)
 
-        # The default admin user cannot be disabled or have its username changed
+        # The default admin user cannot be disabled, have its username changed, or have its status revoked
         is_admin_user = (username == 'admin')
         self.toggle_active_btn.setEnabled(not is_admin_user)
+        self.toggle_admin_btn.setEnabled(not is_admin_user)
         self.username_edit.setEnabled(not is_admin_user)
 
         self.full_name_edit.setText(profile_data.get("full_name") or "")
@@ -338,6 +343,43 @@ class AdminPanelDialog(QDialog):
                 self._populate_users()
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to update user status: {e}")
+
+    def _toggle_user_admin_status(self):
+        selected_items = self.user_tree.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "No Selection", "Please select a user from the list.")
+            return
+
+        selected_item = selected_items[0]
+        user_id = int(selected_item.text(0))
+        username = selected_item.text(1)
+        is_currently_admin = selected_item.text(3) == "Yes"
+
+        if username == 'admin':
+            QMessageBox.warning(self, "Action Denied", "The default admin account's status cannot be changed.")
+            return
+
+        # Prevent admin from revoking their own status if they are the only admin
+        current_user = self.parent().current_user
+        if current_user and current_user['id'] == user_id:
+            admins = [user for user in database.get_all_users() if user['is_admin']]
+            if len(admins) <= 1:
+                QMessageBox.critical(self, "Action Denied", "You cannot revoke your own admin status as you are the only administrator remaining.")
+                return
+
+        new_status = not is_currently_admin
+        action_text = "revoke admin status from" if is_currently_admin else "grant admin status to"
+
+        reply = QMessageBox.question(self, "Confirm Action", f"Are you sure you want to {action_text} the user '{username}'?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                database.set_user_admin_status(user_id, new_status)
+                QMessageBox.information(self, "Success", f"Admin status for '{username}' has been updated.")
+                self._populate_users()
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to update admin status: {e}")
 
     def _reset_user_password(self):
         user_id = self._get_selected_user_id()
