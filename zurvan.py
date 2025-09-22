@@ -89,7 +89,8 @@ from ai_tab import AIAssistantTab, AISettingsDialog, AIGuideDialog
 from login import LoginDialog
 from admin_panel import AdminPanelDialog
 from user_profile import UserProfileDialog
-from PyQt6.QtCore import QObject, pyqtSignal, Qt, QThread, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSequentialAnimationGroup, QPoint, QSize, QAbstractTableModel
+from offline_cve_manager import OfflineCveManagerWidget
+from PyQt6.QtCore import QObject, pyqtSignal, Qt, QThread, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSequentialAnimationGroup, QPoint, QSize, QAbstractTableModel, QDate
 from PyQt6.QtGui import QAction, QIcon, QFont, QTextCursor, QActionGroup
 
 
@@ -1121,18 +1122,56 @@ class CveViewerWidget(QWidget):
 
         main_layout = QVBoxLayout(self)
 
-        # --- Controls ---
-        controls_layout = QHBoxLayout()
+        # --- Top Search Bar ---
+        top_controls_layout = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search CVE descriptions...")
         self.search_input.returnPressed.connect(self.search_cves)
-        controls_layout.addWidget(self.search_input)
+        top_controls_layout.addWidget(self.search_input)
 
         search_btn = QPushButton("Search")
         search_btn.clicked.connect(self.search_cves)
-        controls_layout.addWidget(search_btn)
+        top_controls_layout.addWidget(search_btn)
+        main_layout.addLayout(top_controls_layout)
 
-        main_layout.addLayout(controls_layout)
+        # --- Advanced Filters ---
+        self.filters_box = QGroupBox("Advanced Filters")
+        self.filters_box.setCheckable(True)
+        self.filters_box.setChecked(False)
+        filters_layout = QFormLayout(self.filters_box)
+
+        # CVSS Score Filter
+        self.cvss_score_combo = QComboBox()
+        self.cvss_score_combo.addItems([
+            "Any",
+            "Critical (9.0-10.0)",
+            "High (7.0-8.9)",
+            "Medium (4.0-6.9)",
+            "Low (0.1-3.9)"
+        ])
+        filters_layout.addRow("Minimum CVSSv3 Score:", self.cvss_score_combo)
+
+        # Date Range Filter
+        date_layout = QHBoxLayout()
+        self.date_from_edit = QDateEdit()
+        self.date_from_edit.setCalendarPopup(True)
+        self.date_from_edit.setDate(QDate.currentDate().addYears(-5)) # Default to 5 years ago
+        self.date_to_edit = QDateEdit()
+        self.date_to_edit.setCalendarPopup(True)
+        self.date_to_edit.setDate(QDate.currentDate())
+        date_layout.addWidget(QLabel("From:"))
+        date_layout.addWidget(self.date_from_edit)
+        date_layout.addWidget(QLabel("To:"))
+        date_layout.addWidget(self.date_to_edit)
+        filters_layout.addRow("Published Date:", date_layout)
+
+        main_layout.addWidget(self.filters_box)
+
+        # Connect signals for advanced filters
+        self.filters_box.toggled.connect(self.search_cves)
+        self.cvss_score_combo.currentTextChanged.connect(self.search_cves)
+        self.date_from_edit.dateChanged.connect(self.search_cves)
+        self.date_to_edit.dateChanged.connect(self.search_cves)
 
         # --- Table View ---
         self.table_view = QTableView()
@@ -1168,8 +1207,22 @@ class CveViewerWidget(QWidget):
         sort_column = self.table_model.headers[sort_column_index].lower().replace(" ", "_")
         sort_order_str = "DESC" if sort_order == Qt.SortOrder.DescendingOrder else "ASC"
 
-        self.total_records = database.get_cve_total_count(self.filter_text)
-        self.table_model.load_data(self.filter_text, sort_column, sort_order_str, self.current_page, self.page_size)
+        # Get advanced filter values
+        cvss_min, cvss_max = None, None
+        date_from, date_to = None, None
+
+        if self.filters_box.isChecked():
+            cvss_text = self.cvss_score_combo.currentText()
+            if "Critical" in cvss_text: cvss_min, cvss_max = 9.0, 10.0
+            elif "High" in cvss_text: cvss_min, cvss_max = 7.0, 8.9
+            elif "Medium" in cvss_text: cvss_min, cvss_max = 4.0, 6.9
+            elif "Low" in cvss_text: cvss_min, cvss_max = 0.1, 3.9
+
+            date_from = self.date_from_edit.date().toString("yyyy-MM-dd")
+            date_to = self.date_to_edit.date().toString("yyyy-MM-dd")
+
+        self.total_records = database.get_cve_total_count(self.filter_text, cvss_min, cvss_max, date_from, date_to)
+        self.table_model.load_data(self.filter_text, sort_column, sort_order_str, self.current_page, self.page_size, cvss_min, cvss_max, date_from, date_to)
         self.update_pagination_controls()
 
     def update_pagination_controls(self):
@@ -1268,6 +1321,56 @@ var BLACK_LIST_PATH C:\\Snort\\rules</code></pre>
         ok_button.clicked.connect(self.accept)
         layout.addWidget(ok_button, 0, Qt.AlignmentFlag.AlignRight)
 
+class TorGuideDialog(QDialog):
+    """A dialog that shows a detailed, user-friendly guide for installing Tor."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tor Installation Guide")
+        self.setMinimumSize(800, 600)
+
+        layout = QVBoxLayout(self)
+        text_browser = QTextBrowser()
+        text_browser.setOpenExternalLinks(True)
+
+        guide_html = """
+        <html><head><style>
+            body { font-family: sans-serif; line-height: 1.6; }
+            h1, h2, h3 { color: #4a90e2; }
+            code { background-color: #2d313a; padding: 2px 5px; border-radius: 4px; font-family: "Courier New", monospace; }
+            a { color: #8be9fd; }
+            .note { border-left: 5px solid #ffcc00; padding: 1em; background-color: #3a3a3a; }
+        </style></head><body>
+            <h1>Tor Proxy Installation Guide</h1>
+            <p>To use this feature, you need to have Tor running and listening on the default SOCKS proxy port (9050). The easiest way to do this is by installing and running the <b>Tor Browser</b>.</p>
+
+            <h2>1. Download and Install Tor Browser</h2>
+            <p>Visit the official Tor Project website to download the browser for your operating system:</p>
+            <p><a href="https://www.torproject.org/download/">https://www.torproject.org/download/</a></p>
+            <ul>
+                <li><b>Windows/macOS:</b> Run the downloaded installer and follow the on-screen instructions.</li>
+                <li><b>Linux:</b> Extract the downloaded archive and run the <code>start-tor-browser.desktop</code> script.</li>
+            </ul>
+
+            <h2>2. Run Tor Browser</h2>
+            <p>Simply start the Tor Browser. Once it successfully connects to the Tor network, it will automatically start a SOCKS proxy on <code>127.0.0.1:9050</code> in the background. <b>You must leave Tor Browser running while you use this feature in Zurvan.</b></p>
+
+            <h2>3. (Optional) For Advanced Linux Users: Install Tor Service</h2>
+            <p>If you don't want to run the full Tor Browser, you can install the Tor service:</p>
+            <ul>
+                <li><b>Debian/Ubuntu:</b> <code>sudo apt update && sudo apt install tor</code></li>
+                <li><b>Fedora/CentOS:</b> <code>sudo dnf install tor</code></li>
+            </ul>
+            <p>After installation, the Tor service should start automatically. You can check its status with <code>sudo systemctl status tor</code>.</p>
+
+            <p class="note"><b>Note:</b> For most tools to be routed through Tor, Zurvan uses the <code>proxychains-ng</code> command. Please ensure it is installed on your system (e.g., <code>sudo apt install proxychains-ng</code>).</p>
+        </body></html>
+        """
+        text_browser.setHtml(guide_html)
+        layout.addWidget(text_browser)
+
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        layout.addWidget(ok_button, 0, Qt.AlignmentFlag.AlignRight)
 
 class DnsReconResultsDialog(QDialog):
     def __init__(self, json_data, target_context, parent=None):
@@ -1375,6 +1478,9 @@ class SherlockResultsDialog(QDialog):
 # --- Main Application ---
 class Zurvan(QMainWindow):
     """The main application window, holding all UI elements and logic."""
+    cve_import_status_changed = pyqtSignal(str)
+    cve_import_buttons_enabled = pyqtSignal(bool)
+
     def __init__(self):
         """Initializes the main window, UI components, and internal state."""
         super().__init__()
@@ -1412,6 +1518,8 @@ class Zurvan(QMainWindow):
         self.lab_test_chain = []
         self.threat_intel_loaded = False
         self.history_loaded = False
+        self.reporting_cve_manager = None
+        self.threat_intel_cve_manager = None
         # self.tool_config_widgets is no longer used.
 
         self.nmap_script_presets = {
@@ -1441,6 +1549,17 @@ class Zurvan(QMainWindow):
 
         self._create_main_tabs(); self._create_log_panel(); self._setup_logging()
         self.tab_widget.currentChanged.connect(self._on_main_tab_changed)
+
+        # --- Connect Signals for Synced Widgets ---
+        if self.reporting_cve_manager:
+            self.reporting_cve_manager.start_import.connect(self._start_cve_import)
+            self.cve_import_status_changed.connect(self.reporting_cve_manager.set_status)
+            self.cve_import_buttons_enabled.connect(self.reporting_cve_manager.set_buttons_enabled)
+
+        if self.threat_intel_cve_manager:
+            self.threat_intel_cve_manager.start_import.connect(self._start_cve_import)
+            self.cve_import_status_changed.connect(self.threat_intel_cve_manager.set_status)
+            self.cve_import_buttons_enabled.connect(self.threat_intel_cve_manager.set_buttons_enabled)
 
         self._setup_result_handlers()
         self.results_processor = QTimer(self); self.results_processor.timeout.connect(self._process_tool_results); self.results_processor.start(100)
@@ -1474,10 +1593,43 @@ class Zurvan(QMainWindow):
         if avatar_data:
             pixmap = QPixmap()
             pixmap.loadFromData(avatar_data)
-            self.user_profile_button.setIcon(QIcon(pixmap))
+            # Create a circular pixmap
+            circular_pixmap = self.create_circular_pixmap(pixmap, self.user_profile_button.iconSize())
+            self.user_profile_button.setIcon(QIcon(circular_pixmap))
         else:
             # Fallback to a default icon if no avatar is set
             self.user_profile_button.setIcon(QIcon("icons/Zurvan-mono.png"))
+
+    def create_circular_pixmap(self, source_pixmap, size):
+        """Creates a circular pixmap from a source pixmap."""
+        if source_pixmap.isNull():
+            return QPixmap()
+
+        # Scale the pixmap to the target size, keeping aspect ratio
+        scaled_pixmap = source_pixmap.scaled(size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+
+        # Create a new pixmap with a transparent background
+        circular_pixmap = QPixmap(size)
+        circular_pixmap.fill(Qt.GlobalColor.transparent)
+
+        # Use QPainter to draw the scaled pixmap in a circle
+        painter = QPainter(circular_pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Create a circular clipping path
+        path = QPainterPath()
+        path.addEllipse(0, 0, size.width(), size.height())
+        painter.setClipPath(path)
+
+        # Draw the scaled pixmap onto the circular pixmap
+        # Center the image
+        x = (size.width() - scaled_pixmap.width()) / 2
+        y = (size.height() - scaled_pixmap.height()) / 2
+        painter.drawPixmap(int(x), int(y), scaled_pixmap)
+
+        painter.end()
+
+        return circular_pixmap
 
     def _show_user_menu(self):
         """Shows a context menu for the user profile button."""
@@ -1568,6 +1720,58 @@ class Zurvan(QMainWindow):
         """Shows the Snort installation guide dialog."""
         dialog = SnortGuideDialog(self)
         dialog.exec()
+
+    def _check_tor_proxy(self):
+        """Checks if a SOCKS proxy is available on the default Tor port."""
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1) # 1-second timeout
+                s.connect(("127.0.0.1", 9050))
+            logging.info("Successfully connected to Tor SOCKS proxy on 127.0.0.1:9050.")
+            return True
+        except (socket.timeout, ConnectionRefusedError):
+            logging.warning("Tor SOCKS proxy not found on 127.0.0.1:9050.")
+            return False
+
+    def _update_tool_availability(self):
+        """Disables or enables tools based on Tor compatibility."""
+        is_tor_enabled = self.tor_proxy_check.isChecked()
+
+        # Tools incompatible with Tor (raw sockets, special network handling)
+        scapy_tools = [
+            self.scan_button, self.arp_scan_button, self.ps_start_button,
+            self.trace_button, self.flood_button, self.fw_test_button,
+            self.wifi_scan_button, self.deauth_button, self.bf_start_button,
+            self.wpa_capture_btn, self.krack_start_btn
+        ]
+
+        cli_tools_incompatible = [
+            self.masscan_start_btn, # Masscan uses its own raw socket implementation
+        ]
+
+        # Disable incompatible tools if Tor is on
+        for widget in scapy_tools + cli_tools_incompatible:
+             if hasattr(self, widget.objectName()): # Check if widget has been initialized
+                widget.setEnabled(not is_tor_enabled)
+                widget.setToolTip("This tool is not compatible with the Tor proxy." if is_tor_enabled else "")
+
+    def _handle_tor_toggle(self, checked):
+        """Handles the logic when the Tor proxy checkbox is toggled."""
+        if checked:
+            if not self._check_tor_proxy():
+                self.tor_status_label.setText("Tor Status: <font color='red'>Inactive</font>")
+                self.tor_proxy_check.setChecked(False) # Uncheck the box if connection fails
+
+                # Show the guide
+                guide = TorGuideDialog(self)
+                guide.exec()
+                return # Stop further processing
+            else:
+                self.tor_status_label.setText("Tor Status: <font color='green'>Active</font>")
+        else:
+            self.tor_status_label.setText("Tor Status: [?]")
+
+        self._update_tool_availability()
 
     def get_ai_settings(self):
         """
@@ -1782,7 +1986,23 @@ class Zurvan(QMainWindow):
         self.theme_combo.textActivated.connect(self._handle_theme_change)
         header_layout.addWidget(self.theme_combo)
 
+        # --- Tor Proxy Toggle ---
+        header_layout.addStretch()
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        header_layout.addWidget(separator)
+
+        self.tor_proxy_check = QCheckBox("Use Tor Proxy")
+        self.tor_proxy_check.setToolTip("Route all compatible tool traffic through a local Tor SOCKS proxy (127.0.0.1:9050).")
+        header_layout.addWidget(self.tor_proxy_check)
+        self.tor_status_label = QLabel("Tor Status: [?]")
+        header_layout.addWidget(self.tor_status_label)
+
         self.main_layout.addWidget(header_frame)
+
+        # Connect Tor toggle signal
+        self.tor_proxy_check.toggled.connect(self._handle_tor_toggle)
 
     def _handle_theme_change(self, theme_name):
         theme_file = f"{theme_name}.xml"
@@ -1874,7 +2094,14 @@ class Zurvan(QMainWindow):
         threat_tabs = QTabWidget()
         threat_tabs.addTab(self._create_recent_threats_tab(), "Recent Threats")
         threat_tabs.addTab(self._create_exploit_db_search_tab(), "Exploit-DB Search")
-        threat_tabs.addTab(CveViewerWidget(self), "Offline Database")
+
+        # Offline database tools
+        offline_db_tab = QTabWidget()
+        self.threat_intel_cve_manager = OfflineCveManagerWidget(self)
+        offline_db_tab.addTab(self.threat_intel_cve_manager, "Import/Update")
+        offline_db_tab.addTab(CveViewerWidget(self), "View Database")
+        threat_tabs.addTab(offline_db_tab, "Offline CVE Database")
+
         return threat_tabs
 
     def _create_history_tab(self):
@@ -2725,7 +2952,9 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.nmap_output_console.clear()
 
-        self.worker = WorkerThread(self._nmap_scan_thread, args=(command, target))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'nmap_scan', target, self.nmap_output_console
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -2778,127 +3007,6 @@ class Zurvan(QMainWindow):
             logging.error(f"Failed to generate or save Nmap report: {e}", exc_info=True)
             QMessageBox.critical(self, "Report Generation Error", f"An unexpected error occurred:\n{e}")
 
-    def _nmap_scan_thread(self, command, target):
-        q = self.tool_results_queue
-        logging.info(f"Starting Nmap scan with command: {' '.join(command)}")
-        q.put(('nmap_output', f"$ {' '.join(command)}\n\n"))
-        xml_content = ""
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.nmap_process = process
-
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate() # Terminate the process if cancelled
-                    q.put(('nmap_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('nmap_output', line))
-
-            process.stdout.close()
-            process.wait()
-
-        except FileNotFoundError:
-            q.put(('error', 'Nmap Error', "'nmap' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            q.put(('error', 'Nmap Error', str(e)))
-        finally:
-            # After scan, read the XML report from the temp file
-            if self.nmap_xml_temp_file and os.path.exists(self.nmap_xml_temp_file):
-                try:
-                    with open(self.nmap_xml_temp_file, 'r', encoding='utf-8') as f:
-                        xml_content = f.read()
-                    if xml_content:
-                        q.put(('nmap_xml_result', xml_content))
-                except Exception as e:
-                    logging.error(f"Could not read Nmap XML report: {e}")
-                finally:
-                    os.remove(self.nmap_xml_temp_file)
-                    self.nmap_xml_temp_file = None
-
-            q.put(('tool_finished', 'nmap_scan', target, xml_content))
-            with self.thread_finish_lock:
-                self.nmap_process = None
-            logging.info("Nmap scan thread finished.")
-
-    def _sublist3r_thread(self, domain):
-        """Worker thread to run the Sublist3r script."""
-        q = self.tool_results_queue
-        command = ["python", "tools/sublist3r/sublist3r.py", "-d", domain]
-        logging.info(f"Starting Sublist3r scan with command: {' '.join(command)}")
-        q.put(('sublist3r_output', f"$ {' '.join(command)}\n\n"))
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-            with self.thread_finish_lock:
-                self.sublist3r_process = process
-
-            full_output = []
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('sublist3r_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('sublist3r_output', line))
-                full_output.append(line)
-
-            process.stdout.close()
-            process.wait()
-
-            # If scan was not canceled, parse the results and show the popup
-            if not self.tool_stop_event.is_set():
-                results = []
-                try:
-                    # New method: Find the last non-empty line which should contain the JSON array
-                    json_line = ""
-                    for line in reversed(full_output):
-                        stripped_line = line.strip()
-                        if stripped_line:
-                            json_line = stripped_line
-                            break
-
-                    if json_line.startswith('[') and json_line.endswith(']'):
-                        results = json.loads(json_line)
-                        logging.info(f"Successfully parsed {len(results)} subdomains from sublist3r JSON output.")
-                    else:
-                        # This will trigger the fallback logic
-                        raise ValueError("Could not find JSON list in output.")
-
-                except (json.JSONDecodeError, IndexError, ValueError) as e:
-                    logging.warning(f"Could not parse JSON from sublist3r output ({e}), falling back to fragile text parsing.")
-                    # Fallback to old, fragile parsing method
-                    for line in reversed(full_output):
-                        if "Total Unique Subdomains Found" in line:
-                            break # Stop when we hit the summary line
-                        # A simple check to see if the line is likely a subdomain
-                        if f'.{domain}' in line and not any(c in '<> ' for c in line):
-                             results.append(line.strip())
-                    results.reverse()
-
-                q.put(('subdomain_results', domain, results))
-
-        except FileNotFoundError:
-            q.put(('error', 'Sublist3r Error', "'python' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            q.put(('error', 'Sublist3r Error', str(e)))
-        finally:
-            results_str = "\n".join(results) if 'results' in locals() else ""
-            q.put(('tool_finished', 'sublist3r_scan', domain, results_str))
-            with self.thread_finish_lock:
-                self.sublist3r_process = None
-            logging.info("Sublist3r scan thread finished.")
 
     def _create_subfinder_tool(self):
         """Creates the UI for the Subfinder tool."""
@@ -2995,58 +3103,11 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.subfinder_output.clear()
 
-        self.worker = WorkerThread(self._subfinder_thread, args=(command, domain))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'subfinder_scan', domain, self.subfinder_output
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _subfinder_thread(self, command, domain):
-        """Worker thread for running the subfinder command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting Subfinder with command: {' '.join(command)}")
-        q.put(('subfinder_output', f"$ {' '.join(command)}\n\n"))
-        results = []
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.subfinder_process = process
-
-            full_output = []
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('subfinder_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('subfinder_output', line))
-                full_output.append(line.strip())
-
-            process.stdout.close()
-            process.wait()
-
-            if not self.tool_stop_event.is_set():
-                results = [line for line in full_output if domain in line and ' ' not in line and not line.startswith('$')]
-                q.put(('subdomain_results', domain, results))
-
-        except FileNotFoundError:
-            q.put(('error', 'Subfinder Error', "'subfinder' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            logging.error(f"Subfinder thread error: {e}", exc_info=True)
-            q.put(('error', 'Subfinder Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'subfinder_scan', domain, "\n".join(results)))
-            with self.thread_finish_lock:
-                self.subfinder_process = None
-            logging.info("Subfinder scan thread finished.")
-
-    def _handle_subfinder_output(self, line):
-        self.subfinder_output.insertPlainText(line)
-        self.subfinder_output.verticalScrollBar().setValue(self.subfinder_output.verticalScrollBar().maximum())
 
     def _create_httpx_tool(self):
         """Creates the UI for the httpx tool."""
@@ -3172,58 +3233,11 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.httpx_output.clear()
 
-        self.worker = WorkerThread(self._httpx_thread, args=(command, target_list))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'httpx_scan', target_list, self.httpx_output
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _httpx_thread(self, command, target_list):
-        """Worker thread for running the httpx command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting httpx with command: {' '.join(command)}")
-        q.put(('httpx_output', f"$ {' '.join(command)}\n\n"))
-        json_data = ""
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.httpx_process = process
-
-            full_output = []
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('httpx_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('httpx_output', line))
-                full_output.append(line)
-
-            process.stdout.close()
-            process.wait()
-
-            if not self.tool_stop_event.is_set() and "-json" in command:
-                json_data = "".join(full_output)
-                q.put(('httpx_results', json_data))
-
-        except FileNotFoundError:
-            q.put(('error', 'httpx Error', "'httpx' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            logging.error(f"httpx thread error: {e}", exc_info=True)
-            q.put(('error', 'httpx Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'httpx_scan', target_list, json_data))
-            with self.thread_finish_lock:
-                self.httpx_process = None
-            logging.info("httpx scan thread finished.")
-
-    def _handle_httpx_output(self, line):
-        self.httpx_output.insertPlainText(line)
-        self.httpx_output.verticalScrollBar().setValue(self.httpx_output.verticalScrollBar().maximum())
 
     def _create_rustscan_tool(self):
         """Creates the UI for the RustScan tool."""
@@ -3345,10 +3359,6 @@ class Zurvan(QMainWindow):
         self.active_threads.append(self.worker)
         self.worker.start()
 
-    def _handle_rustscan_output(self, line):
-        self.rustscan_output.insertPlainText(line)
-        self.rustscan_output.verticalScrollBar().setValue(self.rustscan_output.verticalScrollBar().maximum())
-
     def _create_dirsearch_tool(self):
         """Creates the UI for the dirsearch tool."""
         widget = QWidget()
@@ -3463,64 +3473,11 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.dirsearch_output_console.clear()
 
-        self.worker = WorkerThread(self._dirsearch_thread, args=(command, url))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'dirsearch_scan', url, self.dirsearch_output_console
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _dirsearch_thread(self, command, url):
-        """Worker thread for running the dirsearch command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting dirsearch with command: {' '.join(command)}")
-        q.put(('dirsearch_output', f"$ {' '.join(command)}\n\n"))
-        json_data = ""
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.dirsearch_process = process
-
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('dirsearch_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('dirsearch_output', line))
-
-            process.stdout.close()
-            process.wait()
-
-            if not self.tool_stop_event.is_set():
-                try:
-                    with open(self.dirsearch_json_temp_file, 'r', encoding='utf-8') as f:
-                        json_data = f.read()
-                    if json_data:
-                        q.put(('dirsearch_results', json_data, url))
-                except Exception as e:
-                    logging.error(f"Could not read dirsearch JSON report: {e}")
-                finally:
-                    os.remove(self.dirsearch_json_temp_file)
-                    self.dirsearch_json_temp_file = None
-
-        except FileNotFoundError:
-            q.put(('error', 'dirsearch Error', "'dirsearch' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            logging.error(f"dirsearch thread error: {e}", exc_info=True)
-            q.put(('error', 'dirsearch Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'dirsearch_scan', url, json_data))
-            with self.thread_finish_lock:
-                self.dirsearch_process = None
-            logging.info("dirsearch scan thread finished.")
-
-    def _handle_dirsearch_output(self, line):
-        self.dirsearch_output_console.insertPlainText(line)
-        self.dirsearch_output_console.verticalScrollBar().setValue(self.dirsearch_output_console.verticalScrollBar().maximum())
 
     def _create_ffuf_tool(self):
         """Creates the UI for the ffuf tool."""
@@ -3641,69 +3598,11 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.ffuf_output_console.clear()
 
-        self.worker = WorkerThread(self._ffuf_thread, args=(command, url))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'ffuf_scan', url, self.ffuf_output_console
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _ffuf_thread(self, command, url):
-        """Worker thread for running the ffuf command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting ffuf with command: {' '.join(command)}")
-        q.put(('ffuf_output', f"$ {' '.join(command)}\n\n"))
-        json_data = ""
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            # We need to capture stderr because ffuf prints progress there
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.ffuf_process = process
-
-            # Non-blocking read from stderr for progress
-            def read_stderr():
-                for line in iter(process.stderr.readline, ''):
-                    q.put(('ffuf_output', line))
-
-            stderr_thread = threading.Thread(target=read_stderr)
-            stderr_thread.daemon = True
-            stderr_thread.start()
-
-            # Wait for the process to finish
-            process.wait()
-            stderr_thread.join(timeout=1)
-
-            if not self.tool_stop_event.is_set():
-                try:
-                    with open(self.ffuf_json_temp_file, 'r', encoding='utf-8') as f:
-                        json_data = f.read()
-                    if json_data:
-                        q.put(('ffuf_results', json_data))
-                except Exception as e:
-                    logging.error(f"Could not read ffuf JSON report: {e}")
-                finally:
-                    os.remove(self.ffuf_json_temp_file)
-                    self.ffuf_json_temp_file = None
-
-
-        except FileNotFoundError:
-            q.put(('error', 'ffuf Error', "'ffuf' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            logging.error(f"ffuf thread error: {e}", exc_info=True)
-            q.put(('error', 'ffuf Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'ffuf_scan', url, json_data))
-            with self.thread_finish_lock:
-                self.ffuf_process = None
-            logging.info("ffuf scan thread finished.")
-
-    def _handle_ffuf_output(self, line):
-        self.ffuf_output_console.insertPlainText(line)
-        self.ffuf_output_console.verticalScrollBar().setValue(self.ffuf_output_console.verticalScrollBar().maximum())
 
     def _create_enum4linux_ng_tool(self):
         """Creates the UI for the enum4linux-ng tool."""
@@ -3825,67 +3724,11 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.enum4linux_ng_output_console.clear()
 
-        self.worker = WorkerThread(self._enum4linux_ng_thread, args=(command, target))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'enum4linux_ng_scan', target, self.enum4linux_ng_output_console
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _enum4linux_ng_thread(self, command, target):
-        """Worker thread for running the enum4linux-ng command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting enum4linux-ng with command: {' '.join(command)}")
-        q.put(('enum4linux_ng_output', f"$ {' '.join(command)}\n\n"))
-        json_data = ""
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                q.put(('error', 'Platform Error', 'enum4linux-ng is not supported on Windows.'))
-                q.put(('tool_finished', 'enum4linux_ng_scan', target, "Platform not supported"))
-                return
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.enum4linux_ng_process = process
-
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('enum4linux_ng_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('enum4linux_ng_output', line))
-
-            process.stdout.close()
-            process.wait()
-
-            if not self.tool_stop_event.is_set():
-                try:
-                    with open(self.enum4linux_ng_json_temp_file, 'r', encoding='utf-8') as f:
-                        json_data = f.read()
-                    if json_data:
-                        q.put(('enum4linux_ng_results', json_data, target))
-                except Exception as e:
-                    logging.error(f"Could not read enum4linux-ng JSON report: {e}")
-                finally:
-                    os.remove(self.enum4linux_ng_json_temp_file)
-                    self.enum4linux_ng_json_temp_file = None
-
-        except FileNotFoundError:
-            q.put(('error', 'enum4linux-ng Error', "'enum4linux-ng' command not found. Please ensure it is installed and in your system's PATH."))
-            json_data = "Tool not found"
-        except Exception as e:
-            logging.error(f"enum4linux-ng thread error: {e}", exc_info=True)
-            q.put(('error', 'enum4linux-ng Error', str(e)))
-            json_data = f"Error: {e}"
-        finally:
-            q.put(('tool_finished', 'enum4linux_ng_scan', target, json_data))
-            with self.thread_finish_lock:
-                self.enum4linux_ng_process = None
-            logging.info("enum4linux-ng scan thread finished.")
-
-    def _handle_enum4linux_ng_output(self, line):
-        self.enum4linux_ng_output_console.insertPlainText(line)
-        self.enum4linux_ng_output_console.verticalScrollBar().setValue(self.enum4linux_ng_output_console.verticalScrollBar().maximum())
 
     def _create_dnsrecon_tool(self):
         """Creates the UI for the dnsrecon tool."""
@@ -3997,66 +3840,11 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.dnsrecon_output_console.clear()
 
-        self.worker = WorkerThread(self._dnsrecon_thread, args=(command, domain))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'dnsrecon_scan', domain, self.dnsrecon_output_console
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _dnsrecon_thread(self, command, domain):
-        """Worker thread for running the dnsrecon command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting dnsrecon with command: {' '.join(command)}")
-        q.put(('dnsrecon_output', f"$ {' '.join(command)}\n\n"))
-        json_data = ""
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.dnsrecon_process = process
-
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('dnsrecon_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('dnsrecon_output', line))
-
-            process.stdout.close()
-            process.wait()
-
-            if not self.tool_stop_event.is_set():
-                try:
-                    with open(self.dnsrecon_json_temp_file, 'r', encoding='utf-8') as f:
-                        json_data = f.read()
-                    if json_data:
-                        q.put(('dnsrecon_results', json_data, domain))
-                except Exception as e:
-                    logging.error(f"Could not read dnsrecon JSON report: {e}")
-                finally:
-                    os.remove(self.dnsrecon_json_temp_file)
-                    self.dnsrecon_json_temp_file = None
-
-        except FileNotFoundError:
-            q.put(('error', 'dnsrecon Error', "'dnsrecon' command not found. Please ensure it is installed and in your system's PATH."))
-            json_data = "Tool not found"
-        except Exception as e:
-            logging.error(f"dnsrecon thread error: {e}", exc_info=True)
-            q.put(('error', 'dnsrecon Error', str(e)))
-            json_data = f"Error: {e}"
-        finally:
-            q.put(('tool_finished', 'dnsrecon_scan', domain, json_data))
-            with self.thread_finish_lock:
-                self.dnsrecon_process = None
-            logging.info("dnsrecon scan thread finished.")
-
-    def _handle_dnsrecon_output(self, line):
-        self.dnsrecon_output_console.insertPlainText(line)
-        self.dnsrecon_output_console.verticalScrollBar().setValue(self.dnsrecon_output_console.verticalScrollBar().maximum())
 
     def _create_fierce_tool(self):
         """Creates the UI for the fierce DNS scanner tool."""
@@ -4264,7 +4052,7 @@ class Zurvan(QMainWindow):
         return widget, controls
 
     def start_sublist3r_scan(self):
-        """Starts the Sublist3r scan worker thread."""
+        """Starts the Sublist3r scan worker thread using the generic command executor."""
         controls = self.subdomain_controls
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
@@ -4281,7 +4069,10 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.sublist3r_output.clear()
 
-        self.worker = WorkerThread(self._sublist3r_thread, args=(domain,))
+        command = ["python", "tools/sublist3r/sublist3r.py", "-d", domain]
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'sublist3r_scan', domain, self.sublist3r_output
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -7014,48 +6805,92 @@ class Zurvan(QMainWindow):
         instructions.setReadOnly(True)
         instructions.setHtml("""
         <font color='#ffcc00'><b>Snort - Intrusion Detection System</b></font>
-        <p>Run the Snort IDS to monitor network traffic in real-time and detect potential threats based on a defined set of rules.</p>
-        <p><b>Prerequisites:</b>
-        <ol>
-            <li>Snort must be installed and configured on your system.</li>
-            <li>You need a <code>snort.conf</code> file that defines network variables and rule paths.</li>
-            <li>You need a rules file (e.g., <code>local.rules</code>) where your custom rules are defined.</li>
-        </ol>
-        </p>
+        <p>Run the Snort IDS to monitor network traffic in real-time and detect potential threats based on a defined set of rules. Ensure your selected interface is correct.</p>
         """)
+        instructions.setFixedHeight(80)
         layout.addWidget(instructions)
 
-        # --- Controls ---
-        controls_frame = QGroupBox("Snort Configuration")
-        controls_layout = QFormLayout(controls_frame)
+        # --- Main Controls ---
+        main_controls_frame = QGroupBox("Main Configuration")
+        main_controls_layout = QFormLayout(main_controls_frame)
+        self.snort_controls = {}
 
-        # snort.conf file
+        # Config File
         conf_layout = QHBoxLayout()
-        self.snort_conf_edit = QLineEdit()
-        self.snort_conf_edit.setPlaceholderText("e.g., /etc/snort/snort.conf")
-        conf_layout.addWidget(self.snort_conf_edit)
+        self.snort_controls['conf_edit'] = QLineEdit()
+        conf_layout.addWidget(self.snort_controls['conf_edit'])
         browse_conf_btn = QPushButton("Browse...")
-        browse_conf_btn.clicked.connect(lambda: self._browse_file_for_lineedit(self.snort_conf_edit, "Select snort.conf"))
+        browse_conf_btn.clicked.connect(lambda: self._browse_file_for_lineedit(self.snort_controls['conf_edit'], "Select snort.conf"))
         conf_layout.addWidget(browse_conf_btn)
-        controls_layout.addRow("Config File (-c):", conf_layout)
+        main_controls_layout.addRow("Config File (-c):", conf_layout)
 
-        # Rules file (for easy access, though it's included in snort.conf)
+        # Rules File (for editing convenience)
         rules_layout = QHBoxLayout()
-        self.snort_rules_edit = QLineEdit()
-        self.snort_rules_edit.setPlaceholderText("e.g., /etc/snort/rules/local.rules")
-        rules_layout.addWidget(self.snort_rules_edit)
+        self.snort_controls['rules_edit'] = QLineEdit()
+        rules_layout.addWidget(self.snort_controls['rules_edit'])
         browse_rules_btn = QPushButton("Browse...")
-        browse_rules_btn.clicked.connect(lambda: self._browse_file_for_lineedit(self.snort_rules_edit, "Select local.rules"))
+        browse_rules_btn.clicked.connect(lambda: self._browse_file_for_lineedit(self.snort_controls['rules_edit'], "Select local.rules"))
         rules_layout.addWidget(browse_rules_btn)
-        controls_layout.addRow("Rules File (for editing):", rules_layout)
+        main_controls_layout.addRow("Rules File (for editing):", rules_layout)
+        layout.addWidget(main_controls_frame)
 
-        # Other options
-        self.snort_quiet_check = QCheckBox("Quiet Mode (-q)")
-        self.snort_quiet_check.setChecked(True)
-        self.snort_quiet_check.setToolTip("Suppress non-alert output for a cleaner log.")
-        controls_layout.addRow(self.snort_quiet_check)
+        # --- Tabs for Advanced Options ---
+        options_tabs = QTabWidget()
 
-        layout.addWidget(controls_frame)
+        # Logging Tab
+        logging_tab = QWidget()
+        logging_layout = QFormLayout(logging_tab)
+        self.snort_controls['alert_mode_combo'] = QComboBox()
+        self.snort_controls['alert_mode_combo'].addItems(["console", "cmg", "fast", "full", "none"])
+        logging_layout.addRow("Alert Mode (-A):", self.snort_controls['alert_mode_combo'])
+
+        log_dir_layout = QHBoxLayout()
+        self.snort_controls['log_dir_edit'] = QLineEdit()
+        log_dir_layout.addWidget(self.snort_controls['log_dir_edit'])
+        browse_log_dir_btn = QPushButton("Browse...")
+        browse_log_dir_btn.clicked.connect(lambda: self._browse_dir_for_lineedit(self.snort_controls['log_dir_edit'], "Select Log Directory"))
+        log_dir_layout.addWidget(browse_log_dir_btn)
+        logging_layout.addRow("Log Directory (-l):", log_dir_layout)
+
+        self.snort_controls['binary_log_check'] = QCheckBox("Log packets in pcap format (-b)")
+        logging_layout.addRow(self.snort_controls['binary_log_check'])
+
+        self.snort_controls['no_log_check'] = QCheckBox("Disable Logging (-N)")
+        logging_layout.addRow(self.snort_controls['no_log_check'])
+
+        options_tabs.addTab(logging_tab, "Logging & Alerting")
+
+        # Behavior Tab
+        behavior_tab = QWidget()
+        behavior_layout = QFormLayout(behavior_tab)
+        self.snort_controls['packet_count_edit'] = QLineEdit()
+        self.snort_controls['packet_count_edit'].setPlaceholderText("Process all packets")
+        behavior_layout.addRow("Packet Count (-n):", self.snort_controls['packet_count_edit'])
+
+        self.snort_controls['checksum_mode_combo'] = QComboBox()
+        self.snort_controls['checksum_mode_combo'].addItems(["all", "noip", "notcp", "noudp", "noicmp", "none"])
+        behavior_layout.addRow("Checksum Mode (-k):", self.snort_controls['checksum_mode_combo'])
+
+        self.snort_controls['verbose_check'] = QCheckBox("Verbose (-v)")
+        self.snort_controls['quiet_check'] = QCheckBox("Quiet (-q)")
+        self.snort_controls['daemon_check'] = QCheckBox("Run as Daemon (-D)")
+        behavior_layout.addRow(self.snort_controls['verbose_check'])
+        behavior_layout.addRow(self.snort_controls['quiet_check'])
+        behavior_layout.addRow(self.snort_controls['daemon_check'])
+        options_tabs.addTab(behavior_tab, "Behavior")
+
+        # Packet Dump Tab
+        dump_tab = QWidget()
+        dump_layout = QFormLayout(dump_tab)
+        self.snort_controls['dump_app_check'] = QCheckBox("Dump Application Layer (-d)")
+        self.snort_controls['dump_link_check'] = QCheckBox("Dump Link Layer (-e)")
+        self.snort_controls['dump_hex_check'] = QCheckBox("Dump Packets in Hex (-X)")
+        dump_layout.addRow(self.snort_controls['dump_app_check'])
+        dump_layout.addRow(self.snort_controls['dump_link_check'])
+        dump_layout.addRow(self.snort_controls['dump_hex_check'])
+        options_tabs.addTab(dump_tab, "Packet Dump")
+
+        layout.addWidget(options_tabs)
 
         # --- Action Buttons ---
         buttons_layout = QHBoxLayout()
@@ -7086,14 +6921,14 @@ class Zurvan(QMainWindow):
 
         # Auto-detect common paths
         if sys.platform == "linux" and os.path.exists("/etc/snort/snort.conf"):
-            self.snort_conf_edit.setText("/etc/snort/snort.conf")
-            self.snort_rules_edit.setText("/etc/snort/rules/local.rules")
+            self.snort_controls['conf_edit'].setText("/etc/snort/snort.conf")
+            self.snort_controls['rules_edit'].setText("/etc/snort/rules/local.rules")
         elif sys.platform == "win32" and snort_path:
             snort_dir = os.path.dirname(snort_path)
             win_conf_path = os.path.join(snort_dir, "..", "etc", "snort.conf")
             if os.path.exists(win_conf_path):
-                 self.snort_conf_edit.setText(os.path.normpath(win_conf_path))
-                 self.snort_rules_edit.setText(os.path.normpath(os.path.join(snort_dir, "..", "rules", "local.rules")))
+                 self.snort_controls['conf_edit'].setText(os.path.normpath(win_conf_path))
+                 self.snort_controls['rules_edit'].setText(os.path.normpath(os.path.join(snort_dir, "..", "rules", "local.rules")))
 
 
         # --- Connections ---
@@ -7104,31 +6939,52 @@ class Zurvan(QMainWindow):
         return widget
 
     def start_snort(self, sudo_password=None):
-        """Starts the Snort worker thread."""
+        """Builds the Snort command from the UI and starts the worker thread."""
         if self.is_tool_running and not sudo_password:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        iface = self.get_selected_iface()
-        conf_file = self.snort_conf_edit.text().strip()
-
+        controls = self.snort_controls
+        conf_file = controls['conf_edit'].text().strip()
         if not conf_file:
-            QMessageBox.critical(self, "Input Error", "A Snort configuration file is required.")
+            QMessageBox.critical(self, "Input Error", "A Snort configuration file (-c) is required.")
             return
         if not os.path.exists(conf_file):
             QMessageBox.critical(self, "File Error", f"Configuration file not found:\n{conf_file}")
             return
 
-        command = ["snort", "-A", "console", "-c", conf_file]
+        command = ["snort", "-c", conf_file]
 
+        # Interface
+        iface = self.get_selected_iface()
         if iface:
             command.extend(["-i", iface])
         else:
-            QMessageBox.warning(self, "Interface Warning", "No interface selected. Snort may not function as expected.")
+            QMessageBox.warning(self, "Interface Warning", "No interface selected. Snort may default to the first available, which might not be what you want.")
 
-        if self.snort_quiet_check.isChecked():
-            command.append("-q")
+        # Logging & Alerting Tab
+        command.extend(["-A", controls['alert_mode_combo'].currentText()])
+        if log_dir := controls['log_dir_edit'].text().strip():
+            command.extend(["-l", log_dir])
+        if controls['binary_log_check'].isChecked():
+            command.append("-b")
+        if controls['no_log_check'].isChecked():
+            command.append("-N")
 
+        # Behavior Tab
+        if count := controls['packet_count_edit'].text().strip():
+            command.extend(["-n", count])
+        command.extend(["-k", controls['checksum_mode_combo'].currentText()])
+        if controls['verbose_check'].isChecked(): command.append("-v")
+        if controls['quiet_check'].isChecked(): command.append("-q")
+        if controls['daemon_check'].isChecked(): command.append("-D")
+
+        # Packet Dump Tab
+        if controls['dump_app_check'].isChecked(): command.append("-d")
+        if controls['dump_link_check'].isChecked(): command.append("-e")
+        if controls['dump_hex_check'].isChecked(): command.append("-X")
+
+        # Sudo prompt if needed
         if not sudo_password and sys.platform != "win32":
             if 'snort_ids' not in self.sudo_cancel_handlers:
                 self.sudo_cancel_handlers['snort_ids'] = lambda: (
@@ -8284,6 +8140,127 @@ class Zurvan(QMainWindow):
             q.put(('error', 'Send Error', str(e)))
         finally:
             q.put(('send_finished',))
+
+    def _execute_command_thread(self, command, tool_name, target, output_widget, sudo_password=None):
+        """
+        A generic worker thread for running external command-line tools.
+        It handles sudo password prompting and sends output to the specified widget.
+        It also wraps commands with proxychains-ng if the Tor proxy is enabled.
+        """
+        q = self.tool_results_queue
+
+        # Check if Tor proxy is enabled and wrap the command if necessary
+        # This is done before the sudo check so the final command is `sudo proxychains-ng ...`
+        is_tor_enabled = self.tor_proxy_check.isChecked()
+        if is_tor_enabled and shutil.which("proxychains-ng"):
+             # Define a list of tools that are incompatible with proxychains
+            incompatible_tools = [
+                'masscan_scan', # Masscan has its own proxy options and raw socket usage
+            ]
+            if tool_name not in incompatible_tools:
+                command = ["proxychains-ng"] + command
+
+        logging.info(f"Starting {tool_name} with command: {' '.join(command)}")
+        q.put((f'{tool_name}_output', f"$ {' '.join(command)}\n\n"))
+        full_output = []
+
+        try:
+            startupinfo = None
+            if sys.platform == "win32":
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+            # Prepend sudo if a password was provided
+            if sudo_password:
+                command = ["sudo", "-S"] + command
+
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     stdin=subprocess.PIPE, text=True, bufsize=1,
+                                     startupinfo=startupinfo, encoding='utf-8', errors='replace')
+
+            with self.thread_finish_lock:
+                setattr(self, f'{tool_name}_process', process)
+
+            if sudo_password:
+                process.stdin.write(sudo_password + '\n')
+                process.stdin.flush()
+
+            # Read output line by line
+            for line in iter(process.stdout.readline, ''):
+                if self.tool_stop_event.is_set():
+                    process.terminate()
+                    q.put((f'{tool_name}_output', "\n\n--- Canceled By User ---\n"))
+                    break
+                q.put((f'{tool_name}_output', line))
+                full_output.append(line)
+
+            process.stdout.close()
+            process.wait()
+
+            # Special handling for tools that produce structured output
+            if not self.tool_stop_event.is_set():
+                if tool_name == 'nmap_scan' and hasattr(self, 'nmap_xml_temp_file') and self.nmap_xml_temp_file and os.path.exists(self.nmap_xml_temp_file):
+                     with open(self.nmap_xml_temp_file, 'r', encoding='utf-8') as f:
+                        xml_content = f.read()
+                     if xml_content:
+                        q.put(('nmap_xml_result', xml_content))
+                     os.remove(self.nmap_xml_temp_file)
+                     self.nmap_xml_temp_file = None
+                elif tool_name == 'dirsearch_scan' and hasattr(self, 'dirsearch_json_temp_file') and self.dirsearch_json_temp_file and os.path.exists(self.dirsearch_json_temp_file):
+                    with open(self.dirsearch_json_temp_file, 'r', encoding='utf-8') as f:
+                        json_data = f.read()
+                    if json_data:
+                        q.put(('dirsearch_results', json_data, target))
+                    os.remove(self.dirsearch_json_temp_file)
+                    self.dirsearch_json_temp_file = None
+                elif tool_name == 'ffuf_scan' and hasattr(self, 'ffuf_json_temp_file') and self.ffuf_json_temp_file and os.path.exists(self.ffuf_json_temp_file):
+                    with open(self.ffuf_json_temp_file, 'r', encoding='utf-8') as f:
+                        json_data = f.read()
+                    if json_data:
+                        q.put(('ffuf_results', json_data))
+                    os.remove(self.ffuf_json_temp_file)
+                    self.ffuf_json_temp_file = None
+                elif tool_name == 'enum4linux_ng_scan' and hasattr(self, 'enum4linux_ng_json_temp_file') and self.enum4linux_ng_json_temp_file and os.path.exists(self.enum4linux_ng_json_temp_file):
+                    with open(self.enum4linux_ng_json_temp_file, 'r', encoding='utf-8') as f:
+                        json_data = f.read()
+                    if json_data:
+                        q.put(('enum4linux_ng_results', json_data, target))
+                    os.remove(self.enum4linux_ng_json_temp_file)
+                    self.enum4linux_ng_json_temp_file = None
+                elif tool_name == 'dnsrecon_scan' and hasattr(self, 'dnsrecon_json_temp_file') and self.dnsrecon_json_temp_file and os.path.exists(self.dnsrecon_json_temp_file):
+                    with open(self.dnsrecon_json_temp_file, 'r', encoding='utf-8') as f:
+                        json_data = f.read()
+                    if json_data:
+                        q.put(('dnsrecon_results', json_data, target))
+                    os.remove(self.dnsrecon_json_temp_file)
+                    self.dnsrecon_json_temp_file = None
+                elif tool_name == 'sherlock_scan' and hasattr(self, 'sherlock_temp_dir') and self.sherlock_temp_dir and os.path.exists(self.sherlock_temp_dir):
+                    try:
+                        # Find the first CSV file in the temp directory
+                        for filename in os.listdir(self.sherlock_temp_dir):
+                            if filename.endswith(".csv"):
+                                with open(os.path.join(self.sherlock_temp_dir, filename), 'r', encoding='utf-8') as f:
+                                    csv_data = f.read()
+                                if csv_data:
+                                    q.put(('sherlock_results', csv_data, target))
+                                break # Just read the first one
+                    except Exception as e:
+                        logging.error(f"Could not read Sherlock CSV report: {e}")
+                    finally:
+                        shutil.rmtree(self.sherlock_temp_dir)
+                        self.sherlock_temp_dir = None
+                # Add other structured output handlers here in the future if needed
+
+        except FileNotFoundError:
+            q.put(('error', f'{tool_name.capitalize()} Error', f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH."))
+        except Exception as e:
+            logging.error(f"{tool_name} thread error: {e}", exc_info=True)
+            q.put(('error', f'{tool_name.capitalize()} Error', str(e)))
+        finally:
+            q.put(('tool_finished', tool_name, target, "".join(full_output)))
+            with self.thread_finish_lock:
+                setattr(self, f'{tool_name}_process', None)
+            logging.info(f"{tool_name} scan thread finished.")
 
     def start_traceroute(self):
         """Starts the traceroute worker thread."""
@@ -9490,47 +9467,24 @@ class Zurvan(QMainWindow):
             'cve_result': self._handle_cve_result,
             'exploit_search_status': self._handle_exploit_search_status,
             'exploit_search_results': self._handle_exploit_search_results,
+            'cve_import_status': self.cve_import_status_changed.emit,
             '_status': self._handle_status_update,
             '_clear': self._handle_clear_update,
             '_result': self._handle_result_update,
             '_update': self._handle_result_update, # Catches 'wifi_scan_update'
+            '_output': self._handle_generic_output,
         }
-        self.result_handlers['nmap_output'] = self._handle_nmap_output
         self.result_handlers['nmap_xml_result'] = self._handle_nmap_xml_result
-        self.result_handlers['sublist3r_output'] = self._handle_sublist3r_output
         self.result_handlers['sublist3r_results'] = self._show_subdomain_results_popup
-        self.result_handlers['subfinder_output'] = self._handle_subfinder_output
         self.result_handlers['subdomain_results'] = self._show_subdomain_results_popup
-        self.result_handlers['httpx_output'] = self._handle_httpx_output
         self.result_handlers['httpx_results'] = self._show_httpx_results_popup
-        self.result_handlers['trufflehog_output'] = self._handle_trufflehog_output
         self.result_handlers['trufflehog_results'] = self._show_trufflehog_results_popup
-        self.result_handlers['rustscan_output'] = self._handle_rustscan_output
-        self.result_handlers['dirsearch_output'] = self._handle_dirsearch_output
         self.result_handlers['dirsearch_results'] = self._show_dirsearch_results_popup
-        self.result_handlers['ffuf_output'] = self._handle_ffuf_output
         self.result_handlers['ffuf_results'] = self._show_ffuf_results_popup
-        self.result_handlers['jtr_output'] = self._handle_jtr_output
-        self.result_handlers['hydra_output'] = self._handle_hydra_output
-        self.result_handlers['enum4linux_ng_output'] = self._handle_enum4linux_ng_output
         self.result_handlers['enum4linux_ng_results'] = self._show_enum4linux_ng_results_popup
-        self.result_handlers['dnsrecon_output'] = self._handle_dnsrecon_output
         self.result_handlers['dnsrecon_results'] = self._show_dnsrecon_results_popup
-        self.result_handlers['sherlock_output'] = self._handle_sherlock_output
         self.result_handlers['sherlock_results'] = self._show_sherlock_results_popup
-        self.result_handlers['spiderfoot_output'] = self._handle_spiderfoot_output
-        self.result_handlers['arp_scan_cli_output'] = self._handle_arp_scan_cli_output
-        self.result_handlers['fierce_output'] = self._handle_fierce_output
-        self.result_handlers['wifite_output'] = self._handle_wifite_output
-        self.result_handlers['nikto_output'] = self._handle_nikto_output
-        self.result_handlers['gobuster_output'] = self._handle_gobuster_output
-        self.result_handlers['sqlmap_output'] = self._handle_sqlmap_output
-        self.result_handlers['whatweb_output'] = self._handle_whatweb_output
-        self.result_handlers['hashcat_output'] = self._handle_hashcat_output
-        self.result_handlers['nuclei_output'] = self._handle_nuclei_output
         self.result_handlers['nuclei_results'] = self._show_nuclei_results_popup
-        self.result_handlers['masscan_output'] = self._handle_masscan_output
-        self.result_handlers['snort_ids_output'] = self._handle_snort_output
         self.result_handlers['report_finding'] = self._handle_report_finding
         self.result_handlers['recent_threats_result'] = self._handle_recent_threats_result
         self.result_handlers['cve_import_finished'] = self._handle_cve_import_finished
@@ -9539,14 +9493,14 @@ class Zurvan(QMainWindow):
         """Shows a confirmation message after the CVE import process is complete."""
         if success:
             QMessageBox.information(self, "Import Successful",
-                f"Successfully imported {total_records} records into the offline CVE database.\n\n"
-                "This database is used by the 'Aggregate & Enrich Results' feature on the Reporting tab when the 'Use offline CVE_DB' checkbox is enabled.")
+                f"Successfully imported {total_records} total records into the offline CVE database.")
         else:
             QMessageBox.critical(self, "Import Failed",
                 f"The CVE import process failed with an error:\n\n{error_message}\n\n"
                 "Please check the log for more details.")
-        # Reset the status label
-        self.cve_import_status_label.setText("Status: Idle")
+        # Reset the status label and re-enable buttons
+        self.cve_import_status_changed.emit("Idle")
+        self.cve_import_buttons_enabled.emit(True)
 
     def _handle_report_finished(self, success, message):
         """Handles the result of the report generation thread."""
@@ -9695,8 +9649,9 @@ class Zurvan(QMainWindow):
             return
 
         self.is_tool_running = True
-        self.import_cve_db_btn.setEnabled(False)
+        self.cve_import_buttons_enabled.emit(False)
         self.status_bar.showMessage("Starting CVE database import...")
+        self.cve_import_status_changed.emit("Starting import...")
 
         self.worker = WorkerThread(self._cve_import_thread, args=(file_paths,))
         self.active_threads.append(self.worker)
@@ -9711,18 +9666,19 @@ class Zurvan(QMainWindow):
         error_message = ""
 
         try:
-            database.create_tables()
+            # Ensure the CVE-specific table exists in the correct database file.
+            database.create_cve_table()
             con = sqlite3.connect(db_path)
             cur = con.cursor()
 
             total_files = len(file_paths)
             for i, file_path in enumerate(file_paths):
                 if self.tool_stop_event.is_set():
-                    q.put(('cve_import_status', "CVE import cancelled."))
+                    q.put(('cve_import_status', "Import cancelled."))
                     break
 
                 filename = os.path.basename(file_path)
-                q.put(('cve_import_status', f"Processing file {i+1}/{total_files}: {filename}"))
+                q.put(('cve_import_status', f"Processing file {i+1}/{total_files}: {filename}..."))
 
                 with gzip.open(file_path, 'rb') as f:
                     json_data = f.read()
@@ -9754,7 +9710,7 @@ class Zurvan(QMainWindow):
                 cur.executemany("INSERT OR REPLACE INTO vulnerabilities VALUES (?, ?, ?, ?, ?, ?)", cves_to_insert)
                 con.commit()
                 total_records += len(cves_to_insert)
-                q.put(('cve_import_status', f"Finished processing {filename}. {len(cves_to_insert)} records updated."))
+                q.put(('cve_import_status', f"Finished {filename}. Imported {len(cves_to_insert)} records."))
 
         except Exception as e:
             success = False
@@ -10085,10 +10041,6 @@ class Zurvan(QMainWindow):
         dialog = SubdomainResultsDialog(subdomains, domain, self)
         dialog.exec()
 
-    def _handle_sublist3r_output(self, line):
-        self.sublist3r_output.insertPlainText(line)
-        self.sublist3r_output.verticalScrollBar().setValue(self.sublist3r_output.verticalScrollBar().maximum())
-
     def _handle_wifite_output(self, line):
         self.wifite_output_console.insertPlainText(line)
         self.wifite_output_console.verticalScrollBar().setValue(self.wifite_output_console.verticalScrollBar().maximum())
@@ -10213,6 +10165,42 @@ class Zurvan(QMainWindow):
         if tool_name in widgets:
             widgets[tool_name].addTopLevelItem(QTreeWidgetItem([str(x) for x in result_data]))
 
+    def _handle_generic_output(self, tool_name, line):
+        """A generic handler for tool output that finds the correct console widget."""
+        console_widgets = {
+            'nmap_scan': self.nmap_output_console,
+            'sublist3r_scan': self.sublist3r_output,
+            'subfinder_scan': self.subfinder_output,
+            'httpx_scan': self.httpx_output,
+            'rustscan_scan': self.rustscan_output,
+            'dirsearch_scan': self.dirsearch_output_console,
+            'ffuf_scan': self.ffuf_output_console,
+            'enum4linux_ng_scan': self.enum4linux_ng_output_console,
+            'dnsrecon_scan': self.dnsrecon_output_console,
+            'fierce_scan': self.fierce_output_console,
+            'nikto_scan': self.nikto_output_console,
+            'gobuster_scan': self.gobuster_output_console,
+            'whatweb_scan': self.whatweb_output_console,
+            'masscan_scan': self.masscan_output_console,
+            'sqlmap_scan': self.sqlmap_output_console,
+            'hashcat_scan': self.hashcat_output_console,
+            'nuclei_scan': self.nuclei_output_console,
+            'trufflehog_scan': self.trufflehog_output_console,
+            'jtr_scan': self.jtr_output_console,
+            'hydra_scan': self.hydra_output_console,
+            'sherlock_scan': self.sherlock_output_console,
+            'spiderfoot_scan': self.spiderfoot_output_console,
+            'arp_scan_cli_scan': self.arp_scan_cli_output_console,
+            'wifite_scan': self.wifite_output_console,
+            'snort_ids': self.snort_output_console,
+        }
+        if tool_name in console_widgets:
+            widget = console_widgets[tool_name]
+            widget.insertPlainText(line)
+            widget.verticalScrollBar().setValue(widget.verticalScrollBar().maximum())
+        else:
+            logging.warning(f"No console widget found for tool output: {tool_name}")
+
     def _handle_arp_results(self, results):
         for res in results:
             self.arp_tree.addTopLevelItem(QTreeWidgetItem([res['ip'], res['mac'], res['status']]))
@@ -10265,6 +10253,25 @@ class Zurvan(QMainWindow):
                 results = results[:10000] + "\n... (truncated)"
 
             database.log_test_to_history(self.current_user['id'], tool, target, results)
+
+        # Special handling for tools that need their output parsed before UI is updated
+        if tool == 'sublist3r_scan' and results:
+            subdomains = re.findall(r'^[a-zA-Z0-9.\-]+\.' + re.escape(target), results, re.MULTILINE)
+            unique_subdomains = sorted(list(set(subdomains)))
+            self.tool_results_queue.put(('sublist3r_results', target, unique_subdomains))
+        elif tool == 'subfinder_scan' and results:
+            # The target is the domain for subfinder
+            subdomains = [line for line in results.splitlines() if target in line and ' ' not in line and not line.startswith('$')]
+            unique_subdomains = sorted(list(set(subdomains)))
+            # The popup is generic for any subdomain tool
+            self.tool_results_queue.put(('subdomain_results', target, unique_subdomains))
+        elif tool == 'httpx_scan' and results:
+            # The result handler for httpx will attempt to parse JSON
+            self.tool_results_queue.put(('httpx_results', results))
+        elif tool == 'nuclei_scan' and results:
+            self.tool_results_queue.put(('nuclei_results', results))
+        elif tool == 'trufflehog_scan' and results:
+            self.tool_results_queue.put(('trufflehog_results', results))
 
         if tool == 'aggregation':
             self.report_aggregate_btn.setEnabled(True)
@@ -10589,19 +10596,9 @@ class Zurvan(QMainWindow):
         self.report_aggregate_btn.setToolTip("Scan the results from all tool outputs in the current session and enrich them with CVE and Exploit-DB information.")
         self.report_aggregate_btn.clicked.connect(self._handle_aggregation)
         aggregation_controls.addWidget(self.report_aggregate_btn)
-
-        self.import_cve_db_btn = QPushButton(QIcon("icons/folder.svg"), "Import NVD File")
-        self.import_cve_db_btn.setToolTip("Import a manually downloaded NVD JSON feed (*.json.gz).")
-        self.import_cve_db_btn.clicked.connect(self._start_cve_import)
-        aggregation_controls.addWidget(self.import_cve_db_btn)
-
-        self.update_cve_db_btn = QPushButton(QIcon("icons/download-cloud.svg"), "Update Offline DB (Info)")
-        self.update_cve_db_btn.setToolTip("Show instructions for manually updating the offline CVE database.")
-        self.update_cve_db_btn.clicked.connect(self._show_cve_update_info)
-        aggregation_controls.addWidget(self.update_cve_db_btn)
         aggregation_controls.addStretch()
-        self.offline_cve_check = QCheckBox("Use offline CVE_DB")
-        self.offline_cve_check.setToolTip("Use a local copy of CVE data for enrichment. Requires initial download.")
+        self.offline_cve_check = QCheckBox("Use offline CVE_DB for enrichment")
+        self.offline_cve_check.setToolTip("Use a local copy of CVE data for enrichment. Requires initial download via the manager below.")
         aggregation_controls.addWidget(self.offline_cve_check)
         findings_layout.addLayout(aggregation_controls)
 
@@ -10611,11 +10608,11 @@ class Zurvan(QMainWindow):
         self.report_findings_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.report_findings_tree.header().setStretchLastSection(True)
         findings_layout.addWidget(self.report_findings_tree)
-
-        self.cve_import_status_label = QLabel("Status: Idle")
-        findings_layout.addWidget(self.cve_import_status_label)
-
         right_layout.addWidget(findings_box)
+
+        # --- CVE DB Manager ---
+        self.reporting_cve_manager = OfflineCveManagerWidget(self)
+        right_layout.addWidget(self.reporting_cve_manager)
 
         # Generation Box
         generation_box = QGroupBox("Report Generation")

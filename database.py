@@ -443,34 +443,70 @@ def create_cve_table():
     conn.close()
     logging.info("CVE database table 'vulnerabilities' created or already exists.")
 
-def get_cve_data(filter_text, sort_column, sort_order, page, page_size):
-    """Fetches paginated and sorted CVE data from the offline database."""
+def get_cve_data(filter_text, sort_column, sort_order, page, page_size, cvss_min=None, cvss_max=None, date_from=None, date_to=None):
+    """Fetches paginated and sorted CVE data from the offline database with advanced filters."""
     conn = sqlite3.connect("cve.db")
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
     offset = page * page_size
-    # Basic sanitization for column name
-    allowed_columns = ['cve_id', 'cvss_v3_score', 'cvss_v2_score', 'published_date']
+    allowed_columns = ['cve_id', 'cvss_v3_score', 'published_date']
     if sort_column not in allowed_columns:
-        sort_column = 'published_date' # Default sort
-
-    # Basic sanitization for sort order
+        sort_column = 'published_date'
     sort_order = "DESC" if sort_order.upper() == "DESC" else "ASC"
 
-    query = f"SELECT cve_id, description, cvss_v3_score, published_date FROM vulnerabilities WHERE description LIKE ? ORDER BY {sort_column} {sort_order} LIMIT ? OFFSET ?"
-    params = (f'%{filter_text}%', page_size, offset)
+    # Build the WHERE clause dynamically
+    where_clauses = ["description LIKE ?"]
+    params = [f'%{filter_text}%']
 
-    cursor.execute(query, params)
+    if cvss_min is not None:
+        where_clauses.append("cvss_v3_score >= ?")
+        params.append(cvss_min)
+    if cvss_max is not None:
+        where_clauses.append("cvss_v3_score <= ?")
+        params.append(cvss_max)
+    if date_from:
+        # Ensure date is in correct format for query (YYYY-MM-DD)
+        where_clauses.append("date(published_date) >= date(?)")
+        params.append(date_from)
+    if date_to:
+        where_clauses.append("date(published_date) <= date(?)")
+        params.append(date_to)
+
+    where_sql = " AND ".join(where_clauses)
+
+    query = f"SELECT cve_id, description, cvss_v3_score, published_date FROM vulnerabilities WHERE {where_sql} ORDER BY {sort_column} {sort_order} LIMIT ? OFFSET ?"
+    params.extend([page_size, offset])
+
+    cursor.execute(query, tuple(params))
     rows = cursor.fetchall()
     conn.close()
-    return rows
+    return [dict(row) for row in rows]
 
-def get_cve_total_count(filter_text):
-    """Gets the total number of CVEs that match the filter."""
+def get_cve_total_count(filter_text, cvss_min=None, cvss_max=None, date_from=None, date_to=None):
+    """Gets the total number of CVEs that match the filters."""
     conn = sqlite3.connect("cve.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM vulnerabilities WHERE description LIKE ?", (f'%{filter_text}%',))
+
+    where_clauses = ["description LIKE ?"]
+    params = [f'%{filter_text}%']
+
+    if cvss_min is not None:
+        where_clauses.append("cvss_v3_score >= ?")
+        params.append(cvss_min)
+    if cvss_max is not None:
+        where_clauses.append("cvss_v3_score <= ?")
+        params.append(cvss_max)
+    if date_from:
+        where_clauses.append("date(published_date) >= date(?)")
+        params.append(date_from)
+    if date_to:
+        where_clauses.append("date(published_date) <= date(?)")
+        params.append(date_to)
+
+    where_sql = " AND ".join(where_clauses)
+
+    cursor.execute(f"SELECT COUNT(*) FROM vulnerabilities WHERE {where_sql}", tuple(params))
     count = cursor.fetchone()[0]
     conn.close()
     return count
