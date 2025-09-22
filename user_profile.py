@@ -4,36 +4,9 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QFileDialog,
     QLabel, QMessageBox, QGroupBox, QComboBox
 )
-from PyQt6.QtGui import QPixmap, QPainter, QPainterPath, QBrush, QColor
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, QBuffer, QIODevice
 import database
-
-def create_circular_pixmap(source_pixmap, size):
-    """Creates a circular pixmap from a source pixmap."""
-    if source_pixmap.isNull():
-        return QPixmap()
-
-    # Create a new square pixmap to be our canvas
-    circular_pixmap = QPixmap(size, size)
-    circular_pixmap.fill(Qt.GlobalColor.transparent)
-
-    # Create a painter for the circular canvas
-    painter = QPainter(circular_pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    # Define the circular clipping path
-    path = QPainterPath()
-    path.addEllipse(0, 0, size, size)
-    painter.setClipPath(path)
-
-    # Scale the source pixmap to fill the circle, cropping if necessary
-    scaled_pixmap = source_pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
-
-    # Draw the scaled pixmap onto the circular canvas
-    painter.drawPixmap(0, 0, scaled_pixmap)
-    painter.end()
-
-    return circular_pixmap
 
 class UserProfileDialog(QDialog):
     def __init__(self, user, parent=None):
@@ -53,7 +26,7 @@ class UserProfileDialog(QDialog):
         self.avatar_label = QLabel("No avatar set.")
         self.avatar_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.avatar_label.setFixedSize(128, 128)
-        self.avatar_label.setStyleSheet("border: 1px solid #888;")
+        self.avatar_label.setStyleSheet("border: 1px solid #888; border-radius: 64px;")
         change_avatar_btn = QPushButton("Change Avatar")
         change_avatar_btn.clicked.connect(self._change_avatar)
         avatar_layout.addWidget(self.avatar_label, 0, Qt.AlignmentFlag.AlignCenter)
@@ -110,8 +83,7 @@ class UserProfileDialog(QDialog):
         if avatar_data:
             pixmap = QPixmap()
             pixmap.loadFromData(avatar_data)
-            circular_pixmap = create_circular_pixmap(pixmap, 128)
-            self.avatar_label.setPixmap(circular_pixmap)
+            self.avatar_label.setPixmap(pixmap.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         else:
             self.avatar_label.setText("No Avatar")
 
@@ -120,8 +92,7 @@ class UserProfileDialog(QDialog):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Avatar", "", "Image Files (*.png *.jpg *.jpeg *.bmp)", options=QFileDialog.Option.DontUseNativeDialog)
         if file_path:
             pixmap = QPixmap(file_path)
-            circular_pixmap = create_circular_pixmap(pixmap, 128)
-            self.avatar_label.setPixmap(circular_pixmap)
+            self.avatar_label.setPixmap(pixmap.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def _save_changes(self):
         """Validates input and saves all changes to the database."""

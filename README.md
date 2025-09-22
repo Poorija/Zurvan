@@ -99,7 +99,7 @@ Zurvan is organized into a series of tabs, each dedicated to a specific function
 
 ## Usage
 
-Because GScapy uses raw sockets for most of its operations, it requires administrator/root privileges to run correctly.
+Because Zurvan uses raw sockets for most of its operations, it requires administrator/root privileges to run correctly.
 
 **On Linux/macOS:**
 ```bash

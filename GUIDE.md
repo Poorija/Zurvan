@@ -1,6 +1,6 @@
-# GScapy + AI - Comprehensive User Guide
+# Zurvan - Comprehensive User Guide
 
-Welcome to the official user guide for GScapy + AI. This document provides a detailed overview of the application's features, tools, and functionalities.
+Welcome to the official user guide for Zurvan. This document provides a detailed overview of the application's features, tools, and functionalities.
 
 ## Table of Contents
 1.  [Introduction](#introduction)
@@ -48,7 +48,7 @@ Welcome to the official user guide for GScapy + AI. This document provides a det
 
 ## Introduction
 
-GScapy + AI is a graphical interface for the powerful Scapy packet manipulation program. It extends Scapy's capabilities by integrating a suite of popular open-source security tools, an AI-powered analysis assistant, and a modern, user-friendly interface. This application is designed for network administrators, security professionals, and students to learn, test, and analyze network interactions.
+Zurvan is a comprehensive security testing platform that provides a graphical interface for a wide range of security tools, including the powerful Scapy packet manipulation library. It extends these capabilities by integrating a suite of popular open-source security tools, an AI-powered analysis assistant, and a modern, user-friendly interface. This application is designed for network administrators, security professionals, and students to learn, test, and analyze network interactions.
 
 **Disclaimer:** Many tools included in this application can be used for malicious purposes. This software is intended for educational and authorized security testing purposes only. The user is solely responsible for their actions and must have explicit, written permission to test any network or system they do not own.
 
@@ -263,13 +263,13 @@ This section contains tools that are more specialized or carry a higher risk of 
 
 This tab contains tools specifically for 802.11 Wi-Fi network analysis and testing.
 
-**IMPORTANT:** All tools in this section require your wireless card to be in **Monitor Mode**. GScapy cannot do this for you. You must enable it manually using tools like `airmon-ng` on Linux.
+**IMPORTANT:** All tools in this section require your wireless card to be in **Monitor Mode**. Zurvan cannot do this for you. You must enable it manually using tools like `airmon-ng` on Linux.
 
 ### Wi-Fi Scanner
 -   **Purpose:** To discover nearby wireless networks and connected clients.
 -   **UI Layout:** A simple start/stop interface. Results populate the tree view.
 -   **Example Use Case:** You need to get the BSSID (MAC address) and channel of a network for use in other tools.
-    1.  Put your Wi-Fi card in monitor mode and select the monitor interface (e.g., `wlan0mon`) at the top of the GScapy window.
+    1.  Put your Wi-Fi card in monitor mode and select the monitor interface (e.g., `wlan0mon`) at the top of the Zurvan window.
     2.  Click "Scan for Wi-Fi Networks".
     3.  The list will populate with nearby APs.
 
@@ -348,7 +348,7 @@ The AI Assistant integrates with large language models (LLMs) to provide analysi
 ---
 
 ## User Accounts & Profiles
-GScapy now supports a full user account system to provide a personalized and secure experience.
+Zurvan now supports a full user account system to provide a personalized and secure experience.
 
 -   **Login:** On startup, you will be prompted to log in or create a new account.
 -   **User Profile:** Access your profile by clicking the user icon in the top-right corner of the Resource Bar and selecting "Profile...".
