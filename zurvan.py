@@ -1105,9 +1105,9 @@ class CveTableModel(QAbstractTableModel):
             return self.headers[section]
         return None
 
-    def load_data(self, filter_text, sort_column, sort_order, page, page_size):
+    def load_data(self, filter_text, sort_column, sort_order, page, page_size, cvss_min=None, cvss_max=None, date_from=None, date_to=None):
         self.beginResetModel()
-        self.cves = database.get_cve_data(filter_text, sort_column, sort_order, page, page_size)
+        self.cves = database.get_cve_data(filter_text, sort_column, sort_order, page, page_size, cvss_min, cvss_max, date_from, date_to)
         self.endResetModel()
 
 class CveViewerWidget(QWidget):
