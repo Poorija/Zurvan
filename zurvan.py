@@ -83,7 +83,7 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QSplitter, QFileDialog, QMessageBox, QComboBox,
     QListWidget, QListWidgetItem, QScrollArea, QLineEdit, QCheckBox, QFrame, QMenu, QTextEdit, QGroupBox,
     QProgressBar, QTextBrowser, QRadioButton, QButtonGroup, QFormLayout, QGridLayout, QDialog,
-    QHeaderView, QInputDialog, QGraphicsOpacityEffect, QStackedWidget, QToolButton, QTableView
+    QHeaderView, QInputDialog, QGraphicsOpacityEffect, QStackedWidget, QToolButton, QTableView, QDateEdit
 )
 from ai_tab import AIAssistantTab, AISettingsDialog, AIGuideDialog
 from login import LoginDialog
