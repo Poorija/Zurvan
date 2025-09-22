@@ -83,13 +83,13 @@ from PyQt6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QSplitter, QFileDialog, QMessageBox, QComboBox,
     QListWidget, QListWidgetItem, QScrollArea, QLineEdit, QCheckBox, QFrame, QMenu, QTextEdit, QGroupBox,
     QProgressBar, QTextBrowser, QRadioButton, QButtonGroup, QFormLayout, QGridLayout, QDialog,
-    QHeaderView, QInputDialog, QGraphicsOpacityEffect, QStackedWidget, QToolButton
+    QHeaderView, QInputDialog, QGraphicsOpacityEffect, QStackedWidget, QToolButton, QTableView
 )
 from ai_tab import AIAssistantTab, AISettingsDialog, AIGuideDialog
 from login import LoginDialog
 from admin_panel import AdminPanelDialog
-from user_profile import UserProfileDialog, create_circular_pixmap
-from PyQt6.QtCore import QObject, pyqtSignal, Qt, QThread, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSequentialAnimationGroup, QPoint, QSize
+from user_profile import UserProfileDialog
+from PyQt6.QtCore import QObject, pyqtSignal, Qt, QThread, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSequentialAnimationGroup, QPoint, QSize, QAbstractTableModel
 from PyQt6.QtGui import QAction, QIcon, QFont, QTextCursor, QActionGroup
 
 
@@ -109,86 +109,6 @@ def sniffer_process_target(queue, iface, bpf_filter):
     except Exception as e:
         logging.error(f"Critical error in sniffer process: {e}", exc_info=True)
 
-
-class OfflineCveManagerWidget(QWidget):
-    """A reusable widget for managing the offline CVE database."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent_window = parent
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 10, 0, 10)
-
-        controls_box = QGroupBox("Offline NVD Database Management")
-        controls_layout = QHBoxLayout(controls_box)
-
-        self.import_cve_db_btn = QPushButton(QIcon("icons/folder.svg"), "Import NVD File(s)")
-        self.import_cve_db_btn.setToolTip("Import one or more manually downloaded NVD JSON feeds (*.json.gz).")
-        self.import_cve_db_btn.clicked.connect(self._start_cve_import)
-        controls_layout.addWidget(self.import_cve_db_btn)
-
-        self.update_cve_db_btn = QPushButton(QIcon("icons/download-cloud.svg"), "Update Info")
-        self.update_cve_db_btn.setToolTip("Show instructions for manually updating the offline CVE database.")
-        self.update_cve_db_btn.clicked.connect(self._show_cve_update_info)
-        controls_layout.addWidget(self.update_cve_db_btn)
-
-        controls_layout.addStretch()
-
-        self.cve_import_status_label = QLabel("Status: Idle")
-        controls_layout.addWidget(self.cve_import_status_label)
-
-        layout.addWidget(controls_box)
-
-        # Connect to the parent window's signal to receive updates
-        if self.parent_window:
-            self.parent_window.cve_db_updated.connect(self.update_status_label)
-            # Initial status check
-            self.update_status_label()
-
-    def update_status_label(self):
-        """Checks the DB and updates the status label with the record count."""
-        try:
-            if os.path.exists("cve.db"):
-                con = sqlite3.connect("cve.db")
-                cur = con.cursor()
-                cur.execute("SELECT count(*) FROM vulnerabilities")
-                count = cur.fetchone()[0]
-                con.close()
-                self.cve_import_status_label.setText(f"Status: {count:,} records loaded.")
-            else:
-                self.cve_import_status_label.setText("Status: Database not found.")
-        except Exception as e:
-            self.cve_import_status_label.setText("Status: Error checking DB.")
-            logging.error(f"Could not check CVE DB status: {e}")
-
-    def _show_cve_update_info(self):
-        QMessageBox.information(self, "Manual CVE Database Update",
-            "Automatic downloads from the National Vulnerability Database (NVD) are currently blocked by their security provider (Cloudflare).\n\n"
-            "To update the offline database, please follow these steps:\n"
-            "1. Go to the NVD Data Feeds page: https://nvd.nist.gov/vuln/data-feeds\n"
-            "2. Download the desired JSON feeds (e.g., 'nvdcve-1.1-modified.json.gz', 'nvdcve-1.1-2023.json.gz', etc.).\n"
-            "3. Return to this tab and click the 'Import NVD File' button.\n"
-            "4. Select the downloaded `.json.gz` file(s) to import them into the local database.")
-
-    def _start_cve_import(self):
-        """Starts the background thread to import local CVE files."""
-        if self.parent_window and self.parent_window.is_tool_running:
-            QMessageBox.warning(self, "Busy", "Another tool is already running.")
-            return
-
-        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select NVD JSON Feed(s)", "", "NVD JSON Files (*.json.gz)", options=QFileDialog.Option.DontUseNativeDialog)
-        if not file_paths:
-            return
-
-        if self.parent_window:
-            self.parent_window.is_tool_running = True
-        self.import_cve_db_btn.setEnabled(False)
-        self.parent_window.status_bar.showMessage("Starting CVE database import...")
-
-        # Note: The thread is still a method of the main window for simplicity of queue handling
-        self.worker = WorkerThread(self.parent_window._cve_import_thread, args=(file_paths,))
-        self.parent_window.active_threads.append(self.worker)
-        self.worker.start()
 
 class KrackScanThread(QThread):
     vulnerability_detected = pyqtSignal(str, str) # bssid, client_mac
@@ -1149,6 +1069,206 @@ class Enum4LinuxNGResultsDialog(QDialog):
             logging.error(f"Error parsing enum4linux-ng JSON: {e}")
             self.tree.addTopLevelItem(QTreeWidgetItem([f"An unexpected error occurred: {e}"]))
 
+class CveTableModel(QAbstractTableModel):
+    """A table model for displaying CVE data from the database with pagination."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.cves = []
+        self.headers = ["CVE ID", "Description", "CVSSv3 Score", "Published Date"]
+
+    def rowCount(self, parent):
+        return len(self.cves)
+
+    def columnCount(self, parent):
+        return len(self.headers)
+
+    def data(self, index, role):
+        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+            return None
+
+        row_data = self.cves[index.row()]
+        column = index.column()
+
+        if column == 0:
+            return row_data['cve_id']
+        elif column == 1:
+            return row_data['description']
+        elif column == 2:
+            return str(row_data['cvss_v3_score'] or 'N/A')
+        elif column == 3:
+            return row_data['published_date']
+        return None
+
+    def headerData(self, section, orientation, role):
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            return self.headers[section]
+        return None
+
+    def load_data(self, filter_text, sort_column, sort_order, page, page_size):
+        self.beginResetModel()
+        self.cves = database.get_cve_data(filter_text, sort_column, sort_order, page, page_size)
+        self.endResetModel()
+
+class CveViewerWidget(QWidget):
+    """A widget for viewing, searching, and paginating the offline CVE database."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent = parent
+        self.current_page = 0
+        self.page_size = 20
+        self.total_records = 0
+        self.filter_text = ""
+
+        main_layout = QVBoxLayout(self)
+
+        # --- Controls ---
+        controls_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search CVE descriptions...")
+        self.search_input.returnPressed.connect(self.search_cves)
+        controls_layout.addWidget(self.search_input)
+
+        search_btn = QPushButton("Search")
+        search_btn.clicked.connect(self.search_cves)
+        controls_layout.addWidget(search_btn)
+
+        main_layout.addLayout(controls_layout)
+
+        # --- Table View ---
+        self.table_view = QTableView()
+        self.table_model = CveTableModel(self)
+        self.table_view.setModel(self.table_model)
+        self.table_view.setSortingEnabled(True)
+        self.table_view.horizontalHeader().setSortIndicator(3, Qt.SortOrder.DescendingOrder) # Default sort by date
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table_view.horizontalHeader().setStretchLastSection(True)
+        self.table_view.resizeColumnsToContents()
+        self.table_view.horizontalHeader().sortIndicatorChanged.connect(self.sort_changed)
+        main_layout.addWidget(self.table_view)
+
+        # --- Pagination ---
+        pagination_layout = QHBoxLayout()
+        self.prev_btn = QPushButton("<< Previous")
+        self.prev_btn.clicked.connect(self.prev_page)
+        self.next_btn = QPushButton("Next >>")
+        self.next_btn.clicked.connect(self.next_page)
+        self.page_label = QLabel("Page 1 / 1")
+        pagination_layout.addWidget(self.prev_btn)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.page_label)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.next_btn)
+        main_layout.addLayout(pagination_layout)
+
+        self.update_data()
+
+    def update_data(self):
+        sort_column_index = self.table_view.horizontalHeader().sortIndicatorSection()
+        sort_order = self.table_view.horizontalHeader().sortIndicatorOrder()
+        sort_column = self.table_model.headers[sort_column_index].lower().replace(" ", "_")
+        sort_order_str = "DESC" if sort_order == Qt.SortOrder.DescendingOrder else "ASC"
+
+        self.total_records = database.get_cve_total_count(self.filter_text)
+        self.table_model.load_data(self.filter_text, sort_column, sort_order_str, self.current_page, self.page_size)
+        self.update_pagination_controls()
+
+    def update_pagination_controls(self):
+        total_pages = (self.total_records + self.page_size - 1) // self.page_size
+        self.page_label.setText(f"Page {self.current_page + 1} / {max(1, total_pages)}")
+        self.prev_btn.setEnabled(self.current_page > 0)
+        self.next_btn.setEnabled((self.current_page + 1) * self.page_size < self.total_records)
+
+    def search_cves(self):
+        self.filter_text = self.search_input.text()
+        self.current_page = 0
+        self.update_data()
+
+    def sort_changed(self, logicalIndex, order):
+        self.current_page = 0
+        self.update_data()
+
+    def prev_page(self):
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_data()
+
+    def next_page(self):
+        if (self.current_page + 1) * self.page_size < self.total_records:
+            self.current_page += 1
+            self.update_data()
+
+class SnortGuideDialog(QDialog):
+    """A dialog that shows a detailed, user-friendly guide for installing Snort."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Snort Installation Guide")
+        self.setMinimumSize(800, 600)
+
+        layout = QVBoxLayout(self)
+        text_browser = QTextBrowser()
+        text_browser.setOpenExternalLinks(True)
+
+        guide_html = """
+        <html><head><style>
+            body { font-family: sans-serif; line-height: 1.6; }
+            h1, h2, h3 { color: #4a90e2; }
+            code { background-color: #2d313a; padding: 2px 5px; border-radius: 4px; font-family: "Courier New", monospace; }
+            a { color: #8be9fd; }
+            .note { border-left: 5px solid #ffcc00; padding: 1em; background-color: #3a3a3a; }
+        </style></head><body>
+            <h1>Snort Installation Guide</h1>
+            <p>Snort is a powerful Intrusion Detection System, but its setup can be complex. This guide provides a simplified walkthrough for common operating systems.</p>
+
+            <h2>Linux (Debian/Ubuntu)</h2>
+            <p>This is the most straightforward method.</p>
+            <ol>
+                <li><b>Install Snort:</b><br>
+                    <code>sudo apt update && sudo apt install snort -y</code>
+                </li>
+                <li><b>Configure Network Interface:</b> Open the main configuration file with <code>sudo nano /etc/snort/snort.conf</code>. Find the line that starts with <code>ipvar HOME_NET</code> and change it to match your local network (e.g., <code>ipvar HOME_NET 192.168.1.0/24</code>).</li>
+                <li><b>Validate Configuration:</b> Run the following command to test your configuration file for errors:<br>
+                    <code>sudo snort -T -c /etc/snort/snort.conf</code><br>
+                    If you see "Snort successfully validated the configuration!", you are ready.
+                </li>
+                <li><b>Set Paths in Zurvan:</b> In the Snort tab, set the "Config File" path to <code>/etc/snort/snort.conf</code> and the "Rules File" to <code>/etc/snort/rules/local.rules</code>.</li>
+            </ol>
+
+            <h2>Windows</h2>
+            <p>Installing on Windows requires more manual steps.</p>
+            <ol>
+                <li><b>Download Snort:</b> Go to the <a href="https://www.snort.org/downloads">Snort downloads page</a> and download the installer for Windows. You will need to create a free account.</li>
+                <li><b>Install Npcap:</b> Download and install <a href="https://npcap.com/#download">Npcap</a>, which is required for packet capture on Windows. During installation, be sure to check the box for "Install Npcap in WinPcap API-compatible Mode".</li>
+                <li><b>Run the Snort Installer:</b> Run the downloaded Snort installer and accept the default settings. It will typically install to <code>C:\\Snort</code>.</li>
+                <li><b>Download Rules:</b> From the Snort downloads page, get the "Community Rules" (<code>community-rules.tar.gz</code>).</li>
+                <li><b>Extract Rules:</b> Using a tool like 7-Zip, extract the contents of the <code>community-rules.tar.gz</code> file. Copy the files from the extracted <code>community-rules</code> folder into <code>C:\\Snort\\rules</code>.</li>
+                <li><b>Configure snort.conf:</b>
+                    <ul>
+                        <li>Navigate to <code>C:\\Snort\\etc</code> and open <code>snort.conf</code> in a text editor like Notepad++.</li>
+                        <li>Find <code>ipvar HOME_NET any</code> and change it to your network (e.g., <code>ipvar HOME_NET 192.168.1.0/24</code>).</li>
+                        <li>Find the rule path section. You must change the paths from the Linux format (e.g., <code>var RULE_PATH ../rules</code>) to the correct Windows format. Replace all rule path lines with the following (adjusting <code>C:\\Snort</code> if you installed elsewhere):<br>
+<pre><code>var RULE_PATH C:\\Snort\\rules
+var SO_RULE_PATH C:\\Snort\\so_rules
+var PREPROC_RULE_PATH C:\\Snort\\preproc_rules
+var WHITE_LIST_PATH C:\\Snort\\rules
+var BLACK_LIST_PATH C:\\Snort\\rules</code></pre>
+                        </li>
+                        <li>Find and comment out the line <code>include $RULE_PATH/protocol-voip.rules</code> by adding a '#' at the beginning. This rule is known to cause issues on Windows.</li>
+                        <li>Create a new file named <code>local.rules</code> inside <code>C:\\Snort\\rules</code>.</li>
+                    </ul>
+                </li>
+                 <li><b>Set Paths in Zurvan:</b> In the Snort tab, set the "Config File" path to <code>C:\\Snort\\etc\\snort.conf</code> and the "Rules File" to <code>C:\\Snort\\rules\\local.rules</code>.</li>
+            </ol>
+            <p class="note"><b>Note:</b> You may need to run Zurvan as an Administrator on Windows for Snort to have the necessary permissions to capture network traffic.</p>
+        </body></html>
+        """
+        text_browser.setHtml(guide_html)
+        layout.addWidget(text_browser)
+
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        layout.addWidget(ok_button, 0, Qt.AlignmentFlag.AlignRight)
+
+
 class DnsReconResultsDialog(QDialog):
     def __init__(self, json_data, target_context, parent=None):
         super().__init__(parent)
@@ -1252,61 +1372,13 @@ class SherlockResultsDialog(QDialog):
             logging.error(f"Error parsing Sherlock CSV: {e}")
             self.tree.addTopLevelItem(QTreeWidgetItem([f"An unexpected error occurred: {e}"]))
 
-class TorGuideDialog(QDialog):
-    """A dialog that shows a guide on how to install Tor."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Tor Installation Guide")
-        self.setMinimumSize(600, 400)
-
-        layout = QVBoxLayout(self)
-        text_browser = QTextBrowser()
-        text_browser.setOpenExternalLinks(True)
-
-        guide_html = """
-        <h1>Tor Installation Guide</h1>
-        <p>To use the Tor proxy feature, you need to have Tor running and listening on the default SOCKS port (9050). The easiest way to do this is by installing and running the <b>Tor Browser</b>.</p>
-
-        <h3>Step 1: Download Tor Browser</h3>
-        <p>Go to the official Tor Project website to download the browser for your operating system: <a href="https://www.torproject.org/download/">https://www.torproject.org/download/</a></p>
-
-        <h3>Step 2: Install and Run</h3>
-        <h4>For Windows & macOS:</h4>
-        <ol>
-            <li>Run the downloaded installer and follow the on-screen instructions.</li>
-            <li>Once installed, launch the Tor Browser.</li>
-            <li>Click the "Connect" button. This will start the Tor service in the background.</li>
-            <li>You can minimize the Tor Browser window, but <b>do not close it</b> while you want to use the proxy feature in this application.</li>
-        </ol>
-
-        <h4>For Linux (Debian/Ubuntu):</h4>
-        <ol>
-            <li>Open a terminal.</li>
-            <li>Install the `torbrowser-launcher` package: <code>sudo apt update && sudo apt install torbrowser-launcher</code></li>
-            <li>Run it from your application menu or by typing <code>torbrowser-launcher</code> in the terminal.</li>
-            <li>The launcher will download, verify, and run the Tor Browser for you. Click "Connect" when it starts.</li>
-            <li>You can minimize the Tor Browser window, but <b>do not close it</b> while you want to use the proxy feature.</li>
-        </ol>
-
-        <h3>Step 3: Verify Connection</h3>
-        <p>Once the Tor Browser is running and connected, you can return to this application and check the "Use Tor Proxy" box again. It should now connect successfully.</p>
-        """
-        text_browser.setHtml(guide_html)
-        layout.addWidget(text_browser)
-
-        ok_button = QPushButton("OK")
-        ok_button.clicked.connect(self.accept)
-        layout.addWidget(ok_button)
-
 # --- Main Application ---
 class Zurvan(QMainWindow):
     """The main application window, holding all UI elements and logic."""
-    cve_db_updated = pyqtSignal()
-
     def __init__(self):
         """Initializes the main window, UI components, and internal state."""
         super().__init__()
-        self.setWindowTitle("Zurvan + AI - The Modern Scapy Interface with AI")
+        self.setWindowTitle("Zurvan - Comprehensive AI-Powered Security Platform")
         # Construct path to icon relative to the script's location for robustness
         script_dir = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(script_dir, "icons", "Zurvan-mono.png")
@@ -1396,17 +1468,13 @@ class Zurvan(QMainWindow):
     def _set_user_avatar(self):
         """Sets the user profile button icon based on the user's avatar."""
         if not self.current_user:
-            # Fallback for when no user is logged in
-            self.user_profile_button.setIcon(QIcon("icons/Zurvan-mono.png"))
             return
 
         avatar_data = self.current_user.get('avatar')
         if avatar_data:
-            source_pixmap = QPixmap()
-            source_pixmap.loadFromData(avatar_data)
-            # Use the helper to create a circular pixmap
-            circular_pixmap = create_circular_pixmap(source_pixmap, 32)
-            self.user_profile_button.setIcon(QIcon(circular_pixmap))
+            pixmap = QPixmap()
+            pixmap.loadFromData(avatar_data)
+            self.user_profile_button.setIcon(QIcon(pixmap))
         else:
             # Fallback to a default icon if no avatar is set
             self.user_profile_button.setIcon(QIcon("icons/Zurvan-mono.png"))
@@ -1496,6 +1564,11 @@ class Zurvan(QMainWindow):
         dialog = AIGuideDialog(self)
         dialog.exec()
 
+    def _show_snort_guide(self):
+        """Shows the Snort installation guide dialog."""
+        dialog = SnortGuideDialog(self)
+        dialog.exec()
+
     def get_ai_settings(self):
         """
         Loads AI settings from the JSON file and returns a dictionary
@@ -1568,8 +1641,8 @@ class Zurvan(QMainWindow):
 
         about_text = """
         <b>Zurvan + AI v3.0</b>
-        <p>The Modern Scapy Interface with AI.</p>
-        <p>This application provides tools for sniffing, crafting, and analyzing network packets, with AI-powered analysis and guidance.</p>
+        <p>A Comprehensive Security Testing Platform, powered by AI.</p>
+        <p>This application provides an integrated suite of tools for network analysis, vulnerability scanning, and penetration testing, augmented by AI-powered analysis and guidance.</p>
         <br>
         <p><b>Developer:</b><br>Mohammadmahdi Farhadianfard (ao ga nai 😁)<br>
         mohammadmahdi.farhadianfard@gmail.com</p>
@@ -1702,17 +1775,6 @@ class Zurvan(QMainWindow):
 
         header_layout.addStretch()
 
-        # Tor Proxy Checkbox
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        header_layout.addWidget(separator)
-        self.tor_proxy_check = QCheckBox("Use Tor Proxy")
-        self.tor_proxy_check.setToolTip("Route supported tool traffic through the default Tor proxy (socks5://127.0.0.1:9050).\nUnsupported tools will be disabled.")
-        self.tor_proxy_check.toggled.connect(self._handle_tor_toggle)
-        header_layout.addWidget(self.tor_proxy_check)
-        header_layout.addStretch()
-
         # Theme Switcher
         header_layout.addWidget(QLabel("Theme:"))
         self.theme_combo = QComboBox()
@@ -1778,58 +1840,6 @@ class Zurvan(QMainWindow):
         iface = self.iface_combo.currentText()
         return iface if iface != "Automatic" else None
 
-    def is_tor_enabled(self):
-        """Returns True if the Tor proxy checkbox is checked."""
-        return self.tor_proxy_check.isChecked()
-
-    def _check_tor_proxy(self):
-        """Checks if the Tor SOCKS proxy is available on the default port."""
-        try:
-            with socket.create_connection(("127.0.0.1", 9050), timeout=2):
-                logging.info("Successfully connected to Tor proxy at 127.0.0.1:9050.")
-                return True
-        except (socket.timeout, ConnectionRefusedError):
-            logging.warning("Could not connect to Tor proxy at 127.0.0.1:9050.")
-            return False
-
-    def _handle_tor_toggle(self, checked):
-        """Handles the logic when the 'Use Tor Proxy' checkbox is toggled."""
-        if checked:
-            if not self._check_tor_proxy():
-                # Instead of a simple QMessageBox, show the detailed guide.
-                guide_dialog = TorGuideDialog(self)
-                guide_dialog.exec()
-                self.tor_proxy_check.setChecked(False) # Uncheck the box after showing the guide
-                return
-
-        self._update_tool_availability()
-
-    def _update_tool_availability(self):
-        """Enables or disables tool widgets based on Tor proxy compatibility."""
-        is_tor = self.is_tor_enabled()
-        tor_tooltip = "This tool does not support Tor proxying and has been disabled."
-
-        # List of start button widgets for incompatible tools
-        incompatible_buttons = [
-            self.start_sniff_btn, self.send_btn, self.scan_button, self.arp_scan_button,
-            self.trace_button, self.ps_start_button, self.fw_test_button, self.flood_button,
-            self.wifi_scan_button, self.deauth_button, self.bf_start_button, self.krack_start_btn,
-            self.wifite_start_btn, self.masscan_start_btn,
-            self.arp_scan_cli_controls['start_btn'],
-            self.nikto_controls['start_btn'],
-            self.rustscan_controls['start_btn'],
-            self.ffuf_controls['start_btn'],
-            self.hydra_controls['start_btn'],
-        ]
-
-        for button in incompatible_buttons:
-            # Also check if the button is part of a tool that might not be initialized yet
-            if hasattr(self, 'is_tool_running'):
-                 original_tooltip = button.toolTip()
-                 button.setEnabled(not is_tor)
-                 button.setToolTip(tor_tooltip if is_tor else original_tooltip)
-
-
     def _create_main_tabs(self):
         """Creates the main QTabWidget and adds all the tool tabs."""
         self.tab_widget = QTabWidget()
@@ -1864,17 +1874,7 @@ class Zurvan(QMainWindow):
         threat_tabs = QTabWidget()
         threat_tabs.addTab(self._create_recent_threats_tab(), "Recent Threats")
         threat_tabs.addTab(self._create_exploit_db_search_tab(), "Exploit-DB Search")
-        threat_tabs.addTab(self._create_urlscan_tab(), "URL Scanner (urlscan.io)")
-        threat_tabs.addTab(self._create_abuseipdb_tab(), "IP Reputation (AbuseIPDB)")
-
-        # Create a new tab for the offline DB manager
-        offline_db_tab = QWidget()
-        offline_db_layout = QVBoxLayout(offline_db_tab)
-        self.ti_cve_manager = OfflineCveManagerWidget(self)
-        offline_db_layout.addWidget(self.ti_cve_manager)
-        offline_db_layout.addStretch() # Pushes the widget to the top
-        threat_tabs.addTab(offline_db_tab, "Offline Database")
-
+        threat_tabs.addTab(CveViewerWidget(self), "Offline Database")
         return threat_tabs
 
     def _create_history_tab(self):
@@ -2159,196 +2159,6 @@ class Zurvan(QMainWindow):
         self.load_vulners_api_key()
 
         return widget
-
-    def _create_urlscan_tab(self):
-        """Creates the UI for the urlscan.io tool."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        controls_layout = QHBoxLayout()
-        controls_layout.addWidget(QLabel("URL to Scan:"))
-        self.urlscan_input = QLineEdit()
-        self.urlscan_input.setPlaceholderText("e.g., https://example.com")
-        controls_layout.addWidget(self.urlscan_input)
-        self.urlscan_button = QPushButton("Scan URL")
-        controls_layout.addWidget(self.urlscan_button)
-        layout.addLayout(controls_layout)
-
-        self.urlscan_results_browser = QTextBrowser()
-        self.urlscan_results_browser.setOpenExternalLinks(True)
-        layout.addWidget(self.urlscan_results_browser)
-
-        self.urlscan_button.clicked.connect(self.start_urlscan)
-        return widget
-
-    def start_urlscan(self):
-        """Starts the urlscan.io worker thread."""
-        if self.is_tool_running:
-            QMessageBox.warning(self, "Busy", "Another tool is already running.")
-            return
-
-        url_to_scan = self.urlscan_input.text().strip()
-        if not url_to_scan:
-            QMessageBox.warning(self, "Input Error", "Please enter a URL to scan.")
-            return
-
-        self.is_tool_running = True
-        self.urlscan_button.setEnabled(False)
-        self.urlscan_results_browser.setText("Submitting URL to urlscan.io...")
-
-        self.worker = WorkerThread(self._urlscan_thread, args=(url_to_scan,))
-        self.active_threads.append(self.worker)
-        self.worker.start()
-
-    def _urlscan_thread(self, url_to_scan):
-        """Worker thread to submit a URL to urlscan.io and poll for results."""
-        q = self.tool_results_queue
-        try:
-            # Step 1: Submit the URL for scanning
-            submit_url = 'https://urlscan.io/api/v1/scan/'
-            data = urllib.parse.urlencode({'url': url_to_scan, 'visibility': 'public'}).encode('ascii')
-
-            req = urllib.request.Request(submit_url, data=data, headers={'Content-Type': 'application/json'})
-            with urllib.request.urlopen(req, timeout=20) as response:
-                submit_result = json.load(response)
-
-            if submit_result.get('message') != 'Submission successful':
-                raise Exception(f"API submission failed: {submit_result.get('message', 'Unknown error')}")
-
-            result_api_url = submit_result.get('api')
-            q.put(('urlscan_status', f"URL submitted. Waiting for results from: {submit_result.get('result')}"))
-
-            # Step 2: Poll the result URL until it's ready
-            for _ in range(30): # Poll for up to 5 minutes (30 * 10s)
-                time.sleep(10)
-                try:
-                    with urllib.request.urlopen(result_api_url, timeout=10) as poll_response:
-                        if poll_response.status == 200:
-                            scan_result = json.load(poll_response)
-                            q.put(('urlscan_result', scan_result))
-                            q.put(('tool_finished', 'urlscan', url_to_scan, "Scan complete."))
-                            return
-                except urllib.error.HTTPError as e:
-                    if e.code == 404:
-                        q.put(('urlscan_status', "Scan is still in progress, waiting..."))
-                        continue # Not ready yet, keep polling
-                    else:
-                        raise # A different error occurred
-
-            raise Exception("Scan timed out after 5 minutes.")
-
-        except Exception as e:
-            logging.error(f"urlscan.io thread failed: {e}", exc_info=True)
-            q.put(('error', 'urlscan.io Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'urlscan', url_to_scan))
-
-    def _create_abuseipdb_tab(self):
-        """Creates the UI for the AbuseIPDB tool."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        # API Key Input
-        api_key_layout = QHBoxLayout()
-        api_key_layout.addWidget(QLabel("AbuseIPDB API Key:"))
-        self.abuseipdb_api_key_input = QLineEdit()
-        self.abuseipdb_api_key_input.setPlaceholderText("Get a free key from abuseipdb.com")
-        self.abuseipdb_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        api_key_layout.addWidget(self.abuseipdb_api_key_input)
-        save_api_key_btn = QPushButton("Save Key")
-        api_key_layout.addWidget(save_api_key_btn)
-        layout.addLayout(api_key_layout)
-
-        # IP Input and Search
-        controls_layout = QHBoxLayout()
-        controls_layout.addWidget(QLabel("IP Address to Check:"))
-        self.abuseipdb_input = QLineEdit()
-        self.abuseipdb_input.setPlaceholderText("e.g., 8.8.8.8")
-        controls_layout.addWidget(self.abuseipdb_input)
-        self.abuseipdb_button = QPushButton("Check IP")
-        controls_layout.addWidget(self.abuseipdb_button)
-        layout.addLayout(controls_layout)
-
-        self.abuseipdb_results_browser = QTextBrowser()
-        self.abuseipdb_results_browser.setOpenExternalLinks(True)
-        layout.addWidget(self.abuseipdb_results_browser)
-
-        save_api_key_btn.clicked.connect(self.save_abuseipdb_api_key)
-        self.abuseipdb_button.clicked.connect(self.start_abuseipdb_check)
-        self.load_abuseipdb_api_key() # Load saved key on startup
-
-        return widget
-
-    def save_abuseipdb_api_key(self):
-        """Saves the AbuseIPDB API key to a file."""
-        api_key = self.abuseipdb_api_key_input.text()
-        if not api_key:
-            QMessageBox.warning(self, "Input Error", "Please enter an API key to save.")
-            return
-        try:
-            with open("abuseipdb_api.key", "w") as f:
-                f.write(api_key)
-            QMessageBox.information(self, "Success", "AbuseIPDB API key saved successfully.")
-        except Exception as e:
-            QMessageBox.critical(self, "File Error", f"Could not save API key: {e}")
-
-    def load_abuseipdb_api_key(self):
-        """Loads the AbuseIPDB API key from a file."""
-        try:
-            with open("abuseipdb_api.key", "r") as f:
-                api_key = f.read().strip()
-                self.abuseipdb_api_key_input.setText(api_key)
-        except FileNotFoundError:
-            pass
-        except Exception as e:
-            QMessageBox.critical(self, "File Error", f"Could not load API key: {e}")
-
-    def start_abuseipdb_check(self):
-        """Starts the AbuseIPDB worker thread."""
-        if self.is_tool_running:
-            QMessageBox.warning(self, "Busy", "Another tool is already running.")
-            return
-
-        ip_to_check = self.abuseipdb_input.text().strip()
-        api_key = self.abuseipdb_api_key_input.text().strip()
-
-        if not ip_to_check:
-            QMessageBox.warning(self, "Input Error", "Please enter an IP address to check.")
-            return
-        if not api_key:
-            QMessageBox.warning(self, "API Key Error", "AbuseIPDB API key is required.")
-            return
-
-        self.is_tool_running = True
-        self.abuseipdb_button.setEnabled(False)
-        self.abuseipdb_results_browser.setText(f"Checking IP: {ip_to_check}...")
-
-        self.worker = WorkerThread(self._abuseipdb_thread, args=(ip_to_check, api_key))
-        self.active_threads.append(self.worker)
-        self.worker.start()
-
-    def _abuseipdb_thread(self, ip_address, api_key):
-        """Worker thread to check an IP against AbuseIPDB."""
-        q = self.tool_results_queue
-        try:
-            url = f'https://api.abuseipdb.com/api/v2/check'
-            querystring = {'ipAddress': ip_address, 'maxAgeInDays': '90'}
-            headers = {'Accept': 'application/json', 'Key': api_key}
-
-            req = urllib.request.Request(f"{url}?{urllib.parse.urlencode(querystring)}", headers=headers)
-            with urllib.request.urlopen(req, timeout=15) as response:
-                result = json.load(response)
-
-            if 'errors' in result:
-                raise Exception(result['errors'][0]['detail'])
-
-            q.put(('abuseipdb_result', result.get('data', {})))
-
-        except Exception as e:
-            logging.error(f"AbuseIPDB thread failed: {e}", exc_info=True)
-            q.put(('error', 'AbuseIPDB Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'abuseipdb_check', ip_address))
 
     def save_vulners_api_key(self):
         """Saves the Vulners API key to a file."""
@@ -2898,9 +2708,6 @@ class Zurvan(QMainWindow):
 
         command.extend(self._build_nmap_script_args())
 
-        if self.is_tor_enabled():
-            command.extend(["--proxy", "socks5://127.0.0.1:9050"])
-
         try:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".xml", encoding='utf-8') as tmp_xml:
                 self.nmap_xml_temp_file = tmp_xml.name
@@ -3021,9 +2828,10 @@ class Zurvan(QMainWindow):
                 self.nmap_process = None
             logging.info("Nmap scan thread finished.")
 
-    def _sublist3r_thread(self, command, domain):
+    def _sublist3r_thread(self, domain):
         """Worker thread to run the Sublist3r script."""
         q = self.tool_results_queue
+        command = ["python", "tools/sublist3r/sublist3r.py", "-d", domain]
         logging.info(f"Starting Sublist3r scan with command: {' '.join(command)}")
         q.put(('sublist3r_output', f"$ {' '.join(command)}\n\n"))
 
@@ -3180,9 +2988,6 @@ class Zurvan(QMainWindow):
 
         if output_file := controls['output_edit'].text().strip():
             command.extend(["-o", output_file])
-
-        if self.is_tor_enabled():
-            command.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -3361,9 +3166,6 @@ class Zurvan(QMainWindow):
         if controls['json_output_check'].isChecked():
             command.append("-json")
 
-        if self.is_tor_enabled():
-            command.extend(["-proxy", "socks5://127.0.0.1:9050"])
-
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
         controls['cancel_btn'].setEnabled(True)
@@ -3487,14 +3289,14 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
-    def start_rustscan_scan(self):
-        """Starts the RustScan worker thread."""
+    def start_rustscan_scan(self, sudo_password=None):
+        """Starts the RustScan worker thread, prompting for sudo if necessary."""
         controls = self.rustscan_controls
         if not shutil.which("rustscan"):
             QMessageBox.critical(self, "RustScan Error", "'rustscan' command not found. Please ensure it is installed and in your system's PATH.")
             return
 
-        if self.is_tool_running:
+        if self.is_tool_running and not sudo_password:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
@@ -3521,55 +3323,27 @@ class Zurvan(QMainWindow):
                 command.append("--")
                 command.extend(nmap_args.split())
 
+        # Rustscan needs root for raw socket access.
+        if not sudo_password and sys.platform != "win32":
+            if 'rustscan_scan' not in self.sudo_cancel_handlers:
+                self.sudo_cancel_handlers['rustscan_scan'] = lambda: (
+                    controls['start_btn'].setEnabled(True),
+                    controls['cancel_btn'].setEnabled(False)
+                )
+            self._run_command_with_sudo_prompt(command, self.start_rustscan_scan, 'rustscan_scan')
+            return
+
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
         controls['cancel_btn'].setEnabled(True)
         self.tool_stop_event.clear()
         self.rustscan_output.clear()
 
-        self.worker = WorkerThread(self._rustscan_thread, args=(command, targets))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'rustscan_scan', targets, self.rustscan_output, sudo_password
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _rustscan_thread(self, command, targets):
-        """Worker thread for running the rustscan command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting RustScan with command: {' '.join(command)}")
-        q.put(('rustscan_output', f"$ {' '.join(command)}\n\n"))
-        full_output = []
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.rustscan_process = process
-
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('rustscan_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('rustscan_output', line))
-                full_output.append(line)
-
-            process.stdout.close()
-            process.wait()
-
-        except FileNotFoundError:
-            q.put(('error', 'RustScan Error', "'rustscan' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            logging.error(f"RustScan thread error: {e}", exc_info=True)
-            q.put(('error', 'RustScan Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'rustscan_scan', targets, "".join(full_output)))
-            with self.thread_finish_lock:
-                self.rustscan_process = None
-            logging.info("RustScan scan thread finished.")
 
     def _handle_rustscan_output(self, line):
         self.rustscan_output.insertPlainText(line)
@@ -3680,9 +3454,6 @@ class Zurvan(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "File Error", f"Could not create temporary file for dirsearch report: {e}")
             return
-
-        if self.is_tor_enabled():
-            command.extend(["--proxy", "socks5://127.0.0.1:9050"])
 
         command.append("--no-color")
 
@@ -4504,17 +4275,13 @@ class Zurvan(QMainWindow):
             QMessageBox.critical(self, "Input Error", "Please provide a domain to scan.")
             return
 
-        command = ["python", "tools/sublist3r/sublist3r.py", "-d", domain]
-        if self.is_tor_enabled():
-            command.extend(["--proxy", "127.0.0.1:9050"])
-
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
         controls['cancel_btn'].setEnabled(True)
         self.tool_stop_event.clear()
         self.sublist3r_output.clear()
 
-        self.worker = WorkerThread(self._sublist3r_thread, args=(command, domain))
+        self.worker = WorkerThread(self._sublist3r_thread, args=(domain,))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -4986,9 +4753,6 @@ class Zurvan(QMainWindow):
         if extra_opts := self.whatweb_extra_opts_edit.text().strip():
             command.extend(extra_opts.split())
 
-        if self.is_tor_enabled():
-            command.extend(["--proxy", "127.0.0.1:9050", "--proxy-type", "socks5"])
-
         # Target(s) must be last
         command.extend(target.split())
 
@@ -5249,9 +5013,6 @@ class Zurvan(QMainWindow):
         # --- Additional Options ---
         if extra_opts := self.sqlmap_extra_opts_edit.text().strip():
             command.extend(extra_opts.split())
-
-        if self.is_tor_enabled():
-            command.extend(["--proxy", "socks5://127.0.0.1:9050"])
 
         self.is_tool_running = True
         self.sqlmap_start_btn.setEnabled(False)
@@ -5716,9 +5477,6 @@ class Zurvan(QMainWindow):
 
         if controls['verbose_check'].isChecked():
             command.append("-v")
-
-        if self.is_tor_enabled():
-            command.extend(["-proxy", "socks5://127.0.0.1:9050"])
 
         command.extend(["-nC", "-json"]) # Always disable color and enable JSON for parsing
 
@@ -6382,9 +6140,6 @@ class Zurvan(QMainWindow):
         if timeout := controls['timeout_edit'].text().strip():
             command.extend(["--timeout", timeout])
 
-        if self.is_tor_enabled():
-            command.extend(["--proxy", "socks5://127.0.0.1:9050"])
-
         try:
             # Create a temporary directory for sherlock to save its files
             self.sherlock_temp_dir = tempfile.mkdtemp()
@@ -6677,13 +6432,13 @@ class Zurvan(QMainWindow):
         if file_path:
             self.masscan_outfile_edit.setText(file_path)
 
-    def start_masscan_scan(self):
-        """Starts the Masscan worker thread."""
+    def start_masscan_scan(self, sudo_password=None):
+        """Starts the Masscan worker thread, prompting for sudo if necessary."""
         if not shutil.which("masscan"):
             QMessageBox.critical(self, "Masscan Error", "'masscan' command not found. Please ensure it is installed and in your system's PATH.")
             return
 
-        if self.is_tool_running:
+        if self.is_tool_running and not sudo_password:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
@@ -6695,25 +6450,24 @@ class Zurvan(QMainWindow):
             QMessageBox.critical(self, "Input Error", "Target, Ports, and Rate are required.")
             return
 
-        is_root = True
-        try:
-            is_root = (os.geteuid() == 0)
-        except AttributeError: # os.geteuid() does not exist on Windows
-            is_root = False
-
-        command_prefix = []
-        if not is_root and sys.platform != "win32":
-            command_prefix = ["sudo"]
-            QMessageBox.warning(self, "Permissions", "Masscan may require root privileges to run correctly. Attempting with 'sudo'. You may be prompted for a password in the terminal where GScapy was launched.")
-
-
-        command = command_prefix + ["masscan", target, "-p", ports, "--rate", rate]
+        command = ["masscan", target, "-p", ports, "--rate", rate]
 
         if outfile := self.masscan_outfile_edit.text().strip():
-            command.extend(["-oJ", outfile]) # JSON output format
+            command.extend(["-oJ", outfile])
 
         if extra_opts := self.masscan_extra_opts_edit.text().strip():
             command.extend(extra_opts.split())
+
+        # Masscan always needs root on non-Windows systems.
+        if not sudo_password and sys.platform != "win32":
+            # Add a specific check to the sudo prompter to re-enable the right buttons on cancel
+            if 'masscan_scan' not in self.sudo_cancel_handlers:
+                self.sudo_cancel_handlers['masscan_scan'] = lambda: (
+                    self.masscan_start_btn.setEnabled(True),
+                    self.masscan_stop_btn.setEnabled(False)
+                )
+            self._run_command_with_sudo_prompt(command, self.start_masscan_scan, 'masscan_scan')
+            return
 
         self.is_tool_running = True
         self.masscan_start_btn.setEnabled(False)
@@ -6721,7 +6475,9 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.masscan_output_console.clear()
 
-        self.worker = WorkerThread(self._masscan_thread, args=(command, target))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'masscan_scan', target, self.masscan_output_console, sudo_password
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -7071,6 +6827,7 @@ class Zurvan(QMainWindow):
         adv_tabs.addTab(self._create_flooder_tool(), "Packet Flooder")
         adv_tabs.addTab(self._create_firewall_tester_tool(), "Firewall Tester")
         adv_tabs.addTab(self._create_arp_spoofer_tool(), "ARP Spoofer")
+        adv_tabs.addTab(self._create_snort_ids_tool(), "Snort IDS")
         adv_tabs.addTab(self._create_sqlmap_tool(), "SQLMap")
         adv_tabs.addTab(self._create_hashcat_tool(), "Hashcat")
         adv_tabs.addTab(self._create_nuclei_tool(), "Nuclei Scanner")
@@ -7246,6 +7003,156 @@ class Zurvan(QMainWindow):
         self.arp_spoof_stop_btn.clicked.connect(self.stop_arp_spoof)
 
         return widget
+
+    def _create_snort_ids_tool(self):
+        """Creates the UI for the Snort IDS tool."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # --- Instructions ---
+        instructions = QTextEdit()
+        instructions.setReadOnly(True)
+        instructions.setHtml("""
+        <font color='#ffcc00'><b>Snort - Intrusion Detection System</b></font>
+        <p>Run the Snort IDS to monitor network traffic in real-time and detect potential threats based on a defined set of rules.</p>
+        <p><b>Prerequisites:</b>
+        <ol>
+            <li>Snort must be installed and configured on your system.</li>
+            <li>You need a <code>snort.conf</code> file that defines network variables and rule paths.</li>
+            <li>You need a rules file (e.g., <code>local.rules</code>) where your custom rules are defined.</li>
+        </ol>
+        </p>
+        """)
+        layout.addWidget(instructions)
+
+        # --- Controls ---
+        controls_frame = QGroupBox("Snort Configuration")
+        controls_layout = QFormLayout(controls_frame)
+
+        # snort.conf file
+        conf_layout = QHBoxLayout()
+        self.snort_conf_edit = QLineEdit()
+        self.snort_conf_edit.setPlaceholderText("e.g., /etc/snort/snort.conf")
+        conf_layout.addWidget(self.snort_conf_edit)
+        browse_conf_btn = QPushButton("Browse...")
+        browse_conf_btn.clicked.connect(lambda: self._browse_file_for_lineedit(self.snort_conf_edit, "Select snort.conf"))
+        conf_layout.addWidget(browse_conf_btn)
+        controls_layout.addRow("Config File (-c):", conf_layout)
+
+        # Rules file (for easy access, though it's included in snort.conf)
+        rules_layout = QHBoxLayout()
+        self.snort_rules_edit = QLineEdit()
+        self.snort_rules_edit.setPlaceholderText("e.g., /etc/snort/rules/local.rules")
+        rules_layout.addWidget(self.snort_rules_edit)
+        browse_rules_btn = QPushButton("Browse...")
+        browse_rules_btn.clicked.connect(lambda: self._browse_file_for_lineedit(self.snort_rules_edit, "Select local.rules"))
+        rules_layout.addWidget(browse_rules_btn)
+        controls_layout.addRow("Rules File (for editing):", rules_layout)
+
+        # Other options
+        self.snort_quiet_check = QCheckBox("Quiet Mode (-q)")
+        self.snort_quiet_check.setChecked(True)
+        self.snort_quiet_check.setToolTip("Suppress non-alert output for a cleaner log.")
+        controls_layout.addRow(self.snort_quiet_check)
+
+        layout.addWidget(controls_frame)
+
+        # --- Action Buttons ---
+        buttons_layout = QHBoxLayout()
+        self.snort_start_btn = QPushButton(QIcon("icons/shield.svg"), " Start Snort")
+        self.snort_stop_btn = QPushButton("Stop Snort"); self.snort_stop_btn.setEnabled(False)
+        self.snort_guide_btn = QPushButton(QIcon("icons/help-circle.svg"), " Installation Guide")
+        buttons_layout.addWidget(self.snort_start_btn)
+        buttons_layout.addWidget(self.snort_stop_btn)
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.snort_guide_btn)
+        layout.addLayout(buttons_layout)
+
+        # --- Output Console ---
+        self.snort_output_console = QPlainTextEdit()
+        self.snort_output_console.setReadOnly(True)
+        self.snort_output_console.setFont(QFont("Courier New", 10))
+        self.snort_output_console.setPlaceholderText("Snort alerts will be displayed here...")
+        layout.addWidget(self.snort_output_console, 1)
+
+        # --- Check for Snort and enable/disable ---
+        snort_path = shutil.which("snort")
+        if not snort_path:
+            widget.setEnabled(False)
+            error_label = QLabel("<b>Snort command not found in system PATH. Please install Snort to use this feature.</b>")
+            error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            error_label.setStyleSheet("color: #ffcc00;")
+            layout.insertWidget(0, error_label)
+
+        # Auto-detect common paths
+        if sys.platform == "linux" and os.path.exists("/etc/snort/snort.conf"):
+            self.snort_conf_edit.setText("/etc/snort/snort.conf")
+            self.snort_rules_edit.setText("/etc/snort/rules/local.rules")
+        elif sys.platform == "win32" and snort_path:
+            snort_dir = os.path.dirname(snort_path)
+            win_conf_path = os.path.join(snort_dir, "..", "etc", "snort.conf")
+            if os.path.exists(win_conf_path):
+                 self.snort_conf_edit.setText(os.path.normpath(win_conf_path))
+                 self.snort_rules_edit.setText(os.path.normpath(os.path.join(snort_dir, "..", "rules", "local.rules")))
+
+
+        # --- Connections ---
+        self.snort_start_btn.clicked.connect(self.start_snort)
+        self.snort_stop_btn.clicked.connect(self.cancel_tool)
+        self.snort_guide_btn.clicked.connect(self._show_snort_guide)
+
+        return widget
+
+    def start_snort(self, sudo_password=None):
+        """Starts the Snort worker thread."""
+        if self.is_tool_running and not sudo_password:
+            QMessageBox.warning(self, "Busy", "Another tool is already running.")
+            return
+
+        iface = self.get_selected_iface()
+        conf_file = self.snort_conf_edit.text().strip()
+
+        if not conf_file:
+            QMessageBox.critical(self, "Input Error", "A Snort configuration file is required.")
+            return
+        if not os.path.exists(conf_file):
+            QMessageBox.critical(self, "File Error", f"Configuration file not found:\n{conf_file}")
+            return
+
+        command = ["snort", "-A", "console", "-c", conf_file]
+
+        if iface:
+            command.extend(["-i", iface])
+        else:
+            QMessageBox.warning(self, "Interface Warning", "No interface selected. Snort may not function as expected.")
+
+        if self.snort_quiet_check.isChecked():
+            command.append("-q")
+
+        if not sudo_password and sys.platform != "win32":
+            if 'snort_ids' not in self.sudo_cancel_handlers:
+                self.sudo_cancel_handlers['snort_ids'] = lambda: (
+                    self.snort_start_btn.setEnabled(True),
+                    self.snort_stop_btn.setEnabled(False)
+                )
+            self._run_command_with_sudo_prompt(command, self.start_snort, 'snort_ids')
+            return
+
+        self.is_tool_running = True
+        self.snort_start_btn.setEnabled(False)
+        self.snort_stop_btn.setEnabled(True)
+        self.tool_stop_event.clear()
+        self.snort_output_console.clear()
+
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'snort_ids', conf_file, self.snort_output_console, sudo_password
+        ))
+        self.active_threads.append(self.worker)
+        self.worker.start()
+
+    def _handle_snort_output(self, line):
+        self.snort_output_console.insertPlainText(line)
+        self.snort_output_console.verticalScrollBar().setValue(self.snort_output_console.verticalScrollBar().maximum())
 
     def _create_system_info_tab(self):
         """Creates the System Info tab with a redesigned, more modern layout."""
@@ -7468,6 +7375,34 @@ class Zurvan(QMainWindow):
         wireless_tabs.addTab(self._create_wifite_tool(), "Wifite Auditor")
         return wireless_tabs
 
+    def _require_root(self, tool_name):
+        """
+        Checks for root privileges and shows a message box if not available. Returns True if root, False otherwise.
+
+        Note on Scapy/Root: Unlike external command-line tools which can be individually prefixed with 'sudo'
+        and receive a password via stdin, Scapy's functions (like sniff, srp) are called directly within
+        the running Python process. Elevating privileges for these specific function calls on-the-fly is not
+        feasible without a major architectural change (e.g., moving all Scapy calls to separate helper scripts).
+        Therefore, this function takes the pragmatic approach of checking for root and, if not present, informing
+        the user of the requirement to restart the whole application with sudo. This prevents crashes and clearly
+        communicates the necessary action to the user.
+        """
+        if sys.platform == "win32":
+            # On Windows, admin is handled differently and often not required for Scapy networking
+            return True
+        try:
+            if os.geteuid() == 0:
+                return True
+        except AttributeError:
+            # os.geteuid() doesn't exist on Windows, so we can consider it "ok"
+            return True
+
+        QMessageBox.critical(self, "Root Privileges Required",
+            f"The '{tool_name}' tool uses low-level networking functions that require root privileges.\n\n"
+            "To use this tool, please restart Zurvan from your terminal using 'sudo':\n"
+            "$ sudo python3 zurvan.py")
+        return False
+
     def _create_krack_scanner_tool(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -7561,13 +7496,13 @@ class Zurvan(QMainWindow):
 
         return widget
 
-    def start_wifite_scan(self):
-        """Starts the Wifite scan worker thread."""
+    def start_wifite_scan(self, sudo_password=None):
+        """Starts the Wifite scan worker thread, prompting for sudo if necessary."""
         if not shutil.which("wifite"):
             QMessageBox.critical(self, "Wifite Error", "'wifite' command not found. Please ensure it is installed and in your system's PATH.")
             return
 
-        if self.is_tool_running:
+        if self.is_tool_running and not sudo_password:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
@@ -7576,20 +7511,7 @@ class Zurvan(QMainWindow):
             QMessageBox.warning(self, "Interface Error", "Please select a monitor-mode wireless interface.")
             return
 
-        # Use pkexec to request root privileges graphically if available and not root
-        try:
-            is_root = (os.geteuid() == 0)
-        except AttributeError: # os.geteuid() does not exist on Windows
-            is_root = False
-
-        command_prefix = []
-        if not is_root and shutil.which("pkexec"):
-             command_prefix = ["pkexec"]
-        elif not is_root:
-            QMessageBox.critical(self, "Permission Error", "Wifite requires root privileges. Please run GScapy with sudo or ensure pkexec is installed for graphical password prompts.")
-            return
-
-        command = command_prefix + ["wifite", "-i", iface]
+        command = ["wifite", "-i", iface]
         essid = self.wifite_essid_edit.text().strip()
         if essid:
             command.extend(["--essid", essid])
@@ -7601,61 +7523,29 @@ class Zurvan(QMainWindow):
         if self.wifite_kill_check.isChecked():
             command.append("--kill")
 
+        # Wifite always needs root on non-Windows systems.
+        if not sudo_password and sys.platform != "win32":
+            # Add a specific check to the sudo prompter to re-enable the right buttons on cancel
+            if 'wifite_scan' not in self.sudo_cancel_handlers:
+                self.sudo_cancel_handlers['wifite_scan'] = lambda: (
+                    self.wifite_start_btn.setEnabled(True),
+                    self.wifite_stop_btn.setEnabled(False)
+                )
+            self._run_command_with_sudo_prompt(command, self.start_wifite_scan, 'wifite_scan')
+            return
+
         self.is_tool_running = True
         self.wifite_start_btn.setEnabled(False)
         self.wifite_stop_btn.setEnabled(True)
         self.tool_stop_event.clear()
         self.wifite_output_console.clear()
 
-        self.worker = WorkerThread(self._wifite_thread, args=(command,))
+        target_for_log = essid or f"all on {iface}"
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'wifite_scan', target_for_log, self.wifite_output_console, sudo_password
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _wifite_thread(self, command):
-        """Worker thread for running the wifite command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting Wifite with command: {' '.join(command)}")
-        q.put(('wifite_output', f"$ {' '.join(command)}\n\n"))
-
-        try:
-            if sys.platform == "win32":
-                q.put(('error', 'Platform Error', 'Wifite is not supported on Windows.'))
-                q.put(('tool_finished', 'wifite_scan'))
-                return
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.wifite_process = process
-
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    # Terminating the parent pkexec/sudo is tricky, we try to kill the child wifite
-                    try:
-                        # This might require root to kill a root process if not run with sudo
-                        os.kill(process.pid, signal.SIGTERM)
-                        logging.info(f"Sent SIGTERM to wifite process {process.pid}")
-                    except Exception as e:
-                        logging.error(f"Could not kill wifite process: {e}")
-                    q.put(('wifite_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('wifite_output', line))
-
-            process.stdout.close()
-            process.wait()
-
-        except FileNotFoundError:
-            q.put(('error', 'Wifite Error', "'wifite' command not found. Please ensure it is installed and in your system's PATH."))
-        except AttributeError: # os.geteuid() doesn't exist on windows
-             q.put(('error', 'Platform Error', 'Wifite requires a Linux-based system with root privileges.'))
-        except Exception as e:
-            logging.error(f"Wifite thread error: {e}", exc_info=True)
-            q.put(('error', 'Wifite Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'wifite_scan'))
-            with self.thread_finish_lock:
-                self.wifite_process = None
-            logging.info("Wifite scan thread finished.")
 
 
     def _create_wifi_scanner_tool(self):
@@ -7665,13 +7555,13 @@ class Zurvan(QMainWindow):
         instructions.setStyleSheet("background-color: #3c3c3c; color: #f0f0f0; border: 1px solid #555;")
         instructions.setHtml("""
         <font color='#ffcc00'><b>WARNING:</b> Wireless tools require the selected interface to be in <b>Monitor Mode</b>.</font>
-        <p>GScapy cannot enable this mode for you. You must do it manually before scanning.</p>
+        <p>Zurvan cannot enable this mode for you. You must do it manually before scanning.</p>
         <p><b>Example for Linux (using airmon-ng):</b></p>
         <ol>
             <li>Find your interface: <code>iwconfig</code> (e.g., wlan0)</li>
             <li>Start monitor mode: <code>sudo airmon-ng start wlan0</code></li>
             <li>A new interface (e.g., wlan0mon) will be created.</li>
-            <li><b>Select the new monitor interface (e.g., wlan0mon) from the dropdown at the top of the GScapy window.</b></li>
+            <li><b>Select the new monitor interface (e.g., wlan0mon) from the dropdown at the top of the Zurvan window.</b></li>
         </ol>
         """)
         layout.addWidget(instructions)
@@ -7895,6 +7785,8 @@ class Zurvan(QMainWindow):
                 QMessageBox.critical(self, "Error", f"Failed to start crunch: {e}")
 
     def start_handshake_capture(self):
+        if not self._require_root("WPA Handshake Capture"):
+            return
         if self.is_tool_running:
             self.stop_handshake_capture()
             return
@@ -7931,6 +7823,8 @@ class Zurvan(QMainWindow):
         self.wpa_pcap_edit.setText(file_path)
 
     def deauth_for_handshake(self):
+        if not self._require_root("Deauthentication"):
+            return
         bssid = self.wpa_target_combo.currentData()
         if not bssid:
             QMessageBox.warning(self, "Target Error", "Please select a target network to deauthenticate.")
@@ -8061,6 +7955,8 @@ class Zurvan(QMainWindow):
     # --- Backend Methods: Sniffer ---
     def start_sniffing(self):
         """Starts the packet sniffer thread."""
+        if not self._require_root("Packet Sniffer"):
+            return
         self.start_sniff_btn.setEnabled(False)
         self.stop_sniff_btn.setEnabled(True)
         self.clear_sniffer_display()
@@ -8343,6 +8239,8 @@ class Zurvan(QMainWindow):
 
     def crafter_send_packet(self):
         """Starts the thread to send the crafted packet(s)."""
+        if not self._require_root("Packet Crafter"):
+            return
         if not self.packet_layers:
             QMessageBox.critical(self, "Error", "No packet layers to build a packet from.")
             return
@@ -8389,6 +8287,8 @@ class Zurvan(QMainWindow):
 
     def start_traceroute(self):
         """Starts the traceroute worker thread."""
+        if not self._require_root("Traceroute"):
+            return
         if self.is_tool_running: QMessageBox.warning(self, "Busy", "Another tool is already running."); return
         t = self.trace_target.text()
         if not t: QMessageBox.critical(self, "Error", "Please enter a target."); return
@@ -8439,6 +8339,8 @@ class Zurvan(QMainWindow):
 
     def start_port_scan(self):
         """Starts the port scanner worker thread."""
+        if not self._require_root("Scapy Port Scanner"):
+            return
         if self.is_tool_running: QMessageBox.warning(self, "Busy", "Another tool is already running."); return
         t=self.scan_target.text(); ps=self.scan_ports.text(); use_frags=self.scan_frag_check.isChecked()
 
@@ -8543,6 +8445,8 @@ class Zurvan(QMainWindow):
 
     def start_arp_scan(self):
         """Starts the ARP scan worker thread."""
+        if not self._require_root("Scapy ARP Scan"):
+            return
         if self.is_tool_running: QMessageBox.warning(self, "Busy", "Another tool is already running."); return
         t=self.arp_target.text()
         if not t: QMessageBox.critical(self, "Error", "Please enter a target network."); return
@@ -8636,14 +8540,14 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
-    def start_arp_scan_cli(self):
-        """Starts the arp-scan CLI worker thread."""
+    def start_arp_scan_cli(self, sudo_password=None):
+        """Starts the arp-scan CLI worker thread, prompting for sudo if necessary."""
         controls = self.arp_scan_cli_controls
         if not shutil.which("arp-scan"):
             QMessageBox.critical(self, "arp-scan Error", "'arp-scan' command not found. Please ensure it is installed and in your system's PATH.")
             return
 
-        if self.is_tool_running:
+        if self.is_tool_running and not sudo_password:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
@@ -8653,6 +8557,7 @@ class Zurvan(QMainWindow):
         if iface:
             command.extend(["--interface", iface])
 
+        target_for_log = "--localnet"
         if controls['localnet_check'].isChecked():
             command.append("--localnet")
         else:
@@ -8661,9 +8566,20 @@ class Zurvan(QMainWindow):
                 QMessageBox.critical(self, "Input Error", "A custom target is required if --localnet is not checked.")
                 return
             command.append(target)
+            target_for_log = target
 
         if controls['verbose_check'].isChecked():
             command.append("--verbose")
+
+        # arp-scan always needs root on non-Windows systems.
+        if not sudo_password and sys.platform != "win32":
+            if 'arp_scan_cli_scan' not in self.sudo_cancel_handlers:
+                self.sudo_cancel_handlers['arp_scan_cli_scan'] = lambda: (
+                    controls['start_btn'].setEnabled(True),
+                    controls['stop_btn'].setEnabled(False)
+                )
+            self._run_command_with_sudo_prompt(command, self.start_arp_scan_cli, 'arp_scan_cli_scan')
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -8671,54 +8587,19 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.arp_scan_cli_output_console.clear()
 
-        self.worker = WorkerThread(self._arp_scan_cli_thread, args=(command,))
+        self.worker = WorkerThread(self._execute_command_thread, args=(
+            command, 'arp_scan_cli_scan', target_for_log, self.arp_scan_cli_output_console, sudo_password
+        ))
         self.active_threads.append(self.worker)
         self.worker.start()
-
-    def _arp_scan_cli_thread(self, command):
-        """Worker thread for running the arp-scan command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting arp-scan with command: {' '.join(command)}")
-        q.put(('arp_scan_cli_output', f"$ {' '.join(command)}\n\n"))
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                q.put(('error', 'Platform Error', 'arp-scan is not supported on Windows.'))
-                q.put(('tool_finished', 'arp_scan_cli_scan'))
-                return
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.arp_scan_cli_process = process
-
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('arp_scan_cli_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('arp_scan_cli_output', line))
-
-            process.stdout.close()
-            process.wait()
-
-        except FileNotFoundError:
-            q.put(('error', 'arp-scan Error', "'arp-scan' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            logging.error(f"arp-scan thread error: {e}", exc_info=True)
-            q.put(('error', 'arp-scan Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'arp_scan_cli_scan'))
-            with self.thread_finish_lock:
-                self.arp_scan_cli_process = None
-            logging.info("arp-scan scan thread finished.")
 
     def _handle_arp_scan_cli_output(self, line):
         self.arp_scan_cli_output_console.insertPlainText(line)
         self.arp_scan_cli_output_console.verticalScrollBar().setValue(self.arp_scan_cli_output_console.verticalScrollBar().maximum())
 
     def start_ping_sweep(self):
+        if not self._require_root("Ping Sweep"):
+            return
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
@@ -8825,6 +8706,8 @@ class Zurvan(QMainWindow):
 
     def start_flood(self):
         """Starts the packet flooder worker threads."""
+        if not self._require_root("Packet Flooder"):
+            return
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
@@ -8918,6 +8801,8 @@ class Zurvan(QMainWindow):
             logging.info("A flood thread finished.")
 
     def start_krack_scan(self):
+        if not self._require_root("KRACK Scanner"):
+            return
         iface = self.get_selected_iface()
         if not iface:
             QMessageBox.warning(self, "Interface Error", "Please select a monitor-mode interface.")
@@ -8951,6 +8836,8 @@ class Zurvan(QMainWindow):
 
     def start_firewall_test(self):
         """Starts the firewall testing worker thread."""
+        if not self._require_root("Firewall Tester"):
+            return
         if self.is_tool_running: QMessageBox.warning(self, "Busy", "Another tool is already running."); return
         t=self.fw_target.text(); ps_name=self.fw_probe_set.currentText()
         if not t: QMessageBox.critical(self, "Error", "Please enter a target."); return
@@ -8991,6 +8878,8 @@ class Zurvan(QMainWindow):
 
     def start_wifi_scan(self):
         """Starts the Wi-Fi scanner and channel hopper threads."""
+        if not self._require_root("Wi-Fi Scanner"):
+            return
         if self.is_tool_running: QMessageBox.warning(self, "Busy", "Another tool is already running."); return
 
         iface = self.get_selected_iface()
@@ -9051,6 +8940,8 @@ class Zurvan(QMainWindow):
         self.tool_results_queue.put(('tool_finished', 'wifi_scan'))
 
     def start_deauth(self):
+        if not self._require_root("Deauthentication Tool"):
+            return
         if self.is_tool_running: QMessageBox.warning(self, "Busy", "Another tool is already running."); return
         bssid = self.deauth_bssid.text(); client = self.deauth_client.text()
         try: count = int(self.deauth_count.text())
@@ -9075,6 +8966,8 @@ class Zurvan(QMainWindow):
             logging.info("Deauth thread finished.")
 
     def start_beacon_flood(self):
+        if not self._require_root("Beacon Flood"):
+            return
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
@@ -9234,6 +9127,8 @@ class Zurvan(QMainWindow):
             logging.info("ARP spoof thread finished.")
 
     def start_arp_spoof(self):
+        if not self._require_root("ARP Spoofer"):
+            return
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
@@ -9635,17 +9530,13 @@ class Zurvan(QMainWindow):
         self.result_handlers['nuclei_output'] = self._handle_nuclei_output
         self.result_handlers['nuclei_results'] = self._show_nuclei_results_popup
         self.result_handlers['masscan_output'] = self._handle_masscan_output
+        self.result_handlers['snort_ids_output'] = self._handle_snort_output
         self.result_handlers['report_finding'] = self._handle_report_finding
         self.result_handlers['recent_threats_result'] = self._handle_recent_threats_result
         self.result_handlers['cve_import_finished'] = self._handle_cve_import_finished
-        self.result_handlers['urlscan_status'] = self._handle_urlscan_status
-        self.result_handlers['urlscan_result'] = self._handle_urlscan_result
-        self.result_handlers['abuseipdb_result'] = self._handle_abuseipdb_result
 
     def _handle_cve_import_finished(self, success, total_records, error_message):
         """Shows a confirmation message after the CVE import process is complete."""
-        self.cve_db_updated.emit() # Notify all widgets to update their status
-
         if success:
             QMessageBox.information(self, "Import Successful",
                 f"Successfully imported {total_records} records into the offline CVE database.\n\n"
@@ -9654,6 +9545,8 @@ class Zurvan(QMainWindow):
             QMessageBox.critical(self, "Import Failed",
                 f"The CVE import process failed with an error:\n\n{error_message}\n\n"
                 "Please check the log for more details.")
+        # Reset the status label
+        self.cve_import_status_label.setText("Status: Idle")
 
     def _handle_report_finished(self, success, message):
         """Handles the result of the report generation thread."""
@@ -9769,7 +9662,7 @@ class Zurvan(QMainWindow):
             })
 
         # 2. Prompt user for save location
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Report", "GScapy_Report.html", "HTML Files (*.html)", options=QFileDialog.Option.DontUseNativeDialog)
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Report", "Security_Report.html", "HTML Files (*.html)", options=QFileDialog.Option.DontUseNativeDialog)
         if not file_path:
             return
 
@@ -9818,20 +9711,9 @@ class Zurvan(QMainWindow):
         error_message = ""
 
         try:
+            database.create_tables()
             con = sqlite3.connect(db_path)
             cur = con.cursor()
-
-            # Create the vulnerabilities table if it doesn't exist.
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS vulnerabilities (
-                    cve_id TEXT PRIMARY KEY,
-                    description TEXT,
-                    cvss_v3_score REAL,
-                    cvss_v2_score REAL,
-                    keywords TEXT,
-                    published_date TEXT
-                )
-            """)
 
             total_files = len(file_paths)
             for i, file_path in enumerate(file_paths):
@@ -9846,35 +9728,27 @@ class Zurvan(QMainWindow):
                     json_data = f.read()
                 data = json.loads(json_data)
 
-                # The NVD JSON format changed. The new root key is 'vulnerabilities'.
-                vulnerabilities = data.get('vulnerabilities', [])
+                cve_items = data.get('CVE_Items', [])
                 cves_to_insert = []
-                for item in vulnerabilities:
-                    cve = item.get('cve', {})
-                    cve_id = cve.get('id', 'N/A')
-
-                    # Get English description
-                    description = "No description available."
-                    for desc_item in cve.get('descriptions', []):
-                        if desc_item.get('lang') == 'en':
-                            description = desc_item.get('value', '')
-                            break
-
-                    # Get CVSS scores
-                    cvss_v3_score = None
-                    cvss_v2_score = None
-                    metrics = cve.get('metrics', {})
-                    if 'cvssMetricV31' in metrics:
-                        cvss_v3_score = metrics['cvssMetricV31'][0]['cvssData'].get('baseScore')
-                    elif 'cvssMetricV2' in metrics:
-                        cvss_v2_score = metrics['cvssMetricV2'][0]['cvssData'].get('baseScore')
-
-                    published_date = cve.get('published', '')
-
-                    # The old CPE-based keyword logic is broken with the new format.
-                    # Create a simplified keyword string from the description for now.
-                    keywords_str = ' '.join(re.findall(r'\w+', description.lower()))
-
+                for cve_item in cve_items:
+                    cve_id = cve_item['cve']['CVE_data_meta']['ID']
+                    description = cve_item['cve']['description']['description_data'][0]['value']
+                    keywords = set()
+                    nodes = cve_item.get('configurations', {}).get('nodes', [])
+                    for node in nodes:
+                        cpe_matches = node.get('cpe_match', [])
+                        for cpe_match in cpe_matches:
+                            cpe_uri = cpe_match.get('cpe23Uri', '')
+                            parts = cpe_uri.split(':')
+                            if len(parts) > 4:
+                                keywords.add(parts[3])
+                                keywords.add(parts[4])
+                    keywords_str = " ".join(sorted(list(keywords)))
+                    metrics_v3 = cve_item.get('impact', {}).get('baseMetricV3', {})
+                    cvss_v3_score = metrics_v3.get('cvssV3', {}).get('baseScore')
+                    metrics_v2 = cve_item.get('impact', {}).get('baseMetricV2', {})
+                    cvss_v2_score = metrics_v2.get('cvssV2', {}).get('baseScore')
+                    published_date = cve_item.get('publishedDate', '')
                     cves_to_insert.append((cve_id, description, cvss_v3_score, cvss_v2_score, keywords_str, published_date))
 
                 cur.executemany("INSERT OR REPLACE INTO vulnerabilities VALUES (?, ?, ?, ?, ?, ?)", cves_to_insert)
@@ -9997,7 +9871,7 @@ class Zurvan(QMainWindow):
         if not report_data:
             return
 
-        file_path, _ = QFileDialog.getSaveFileName(self, f"Save Report as {file_format.upper()}", f"GScapy_Report.{file_format}", f"{file_format.upper()} Files (*.{file_format})", options=QFileDialog.Option.DontUseNativeDialog)
+        file_path, _ = QFileDialog.getSaveFileName(self, f"Save Report as {file_format.upper()}", f"Security_Report.{file_format}", f"{file_format.upper()} Files (*.{file_format})", options=QFileDialog.Option.DontUseNativeDialog)
         if not file_path:
             return
 
@@ -10136,7 +10010,7 @@ class Zurvan(QMainWindow):
             url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch={encoded_keyword}&resultsPerPage=5"
 
             # Add a user-agent to be compliant with API usage policies
-            req = urllib.request.Request(url, headers={'User-Agent': 'GScapy/1.0'})
+            req = urllib.request.Request(url, headers={'User-Agent': 'Zurvan/3.0'})
 
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.load(response)
@@ -10403,14 +10277,6 @@ class Zurvan(QMainWindow):
             self.is_tool_running = False # Explicitly set this as it's a special case
             return
 
-        if tool == 'cve_import':
-            # This tool is special, its button is on a reusable widget
-            # We can find all instances and re-enable them.
-            for manager_widget in self.findChildren(OfflineCveManagerWidget):
-                manager_widget.import_cve_db_btn.setEnabled(True)
-            self.is_tool_running = False
-            return
-
         self.is_tool_running = False
         buttons = {'traceroute': self.trace_button, 'scanner': self.scan_button, 'arp_scan': self.arp_scan_button,
                    'flooder': self.flood_button, 'fw_tester': self.fw_test_button, 'wifi_scan': self.wifi_scan_button,
@@ -10450,68 +10316,6 @@ class Zurvan(QMainWindow):
             status_labels = {'scanner': self.scan_status, 'traceroute': self.trace_status}
             if tool in status_labels:
                 status_labels[tool].setText("Canceled by user.")
-
-    def _handle_urlscan_status(self, status_text):
-        """Updates the status in the urlscan results browser."""
-        self.urlscan_results_browser.setText(status_text)
-
-    def _handle_urlscan_result(self, result):
-        """Formats and displays the final urlscan.io JSON result."""
-        self.urlscan_button.setEnabled(True)
-        try:
-            # A more advanced implementation could pull out specific interesting fields.
-            # For now, just display the pretty-printed JSON.
-
-            # Extract key information for a more readable summary
-            page_info = result.get('page', {})
-            verdicts = result.get('verdicts', {}).get('overall', {})
-
-            html = f"<h3>Scan Report for: {page_info.get('url', 'N/A')}</h3>"
-            html += f"<b>Overall Verdict:</b> {verdicts.get('malicious', False)} (Score: {verdicts.get('score', 0)})<br>"
-            html += f"<b>Scanned from:</b> {result.get('task', {}).get('location', 'N/A')}<br>"
-            html += f"<b>Report URL:</b> <a href='{result.get('result')}'>{result.get('result')}</a><br>"
-            html += f"<b>Screenshot:</b> <a href='{result.get('screenshot')}'>View Screenshot</a><br>"
-
-            html += "<h4>Page Details:</h4>"
-            html += f"<ul>"
-            html += f"<li><b>Title:</b> {page_info.get('title', 'N/A')}</li>"
-            html += f"<li><b>IP Address:</b> {page_info.get('ip', 'N/A')}</li>"
-            html += f"<li><b>Country:</b> {page_info.get('country', 'N/A')}</li>"
-            html += f"<li><b>Server:</b> {page_info.get('server', 'N/A')}</li>"
-            html += "</ul>"
-
-            self.urlscan_results_browser.setHtml(html)
-
-        except Exception as e:
-            self.urlscan_results_browser.setText(f"Failed to format result: {e}\n\n{json.dumps(result, indent=4)}")
-
-    def _handle_abuseipdb_result(self, data):
-        """Formats and displays the final AbuseIPDB JSON result."""
-        self.abuseipdb_button.setEnabled(True)
-        try:
-            if not data:
-                self.abuseipdb_results_browser.setText("No data returned for this IP address.")
-                return
-
-            confidence_score = data.get('abuseConfidenceScore', 0)
-            country = data.get('countryCode', 'N/A')
-            isp = data.get('isp', 'N/A')
-            domain = data.get('domain', 'N/A')
-            total_reports = data.get('totalReports', 0)
-            is_whitelisted = data.get('isWhitelisted', False)
-
-            html = f"<h3>Report for: {data.get('ipAddress')}</h3>"
-            html += f"<b>Abuse Confidence Score:</b> {confidence_score}%<br>"
-            html += f"<b>Total Reports:</b> {total_reports}<br>"
-            html += f"<b>Country:</b> {country}<br>"
-            html += f"<b>ISP:</b> {isp}<br>"
-            html += f"<b>Domain:</b> {domain}<br>"
-            html += f"<b>Whitelisted:</b> {'Yes' if is_whitelisted else 'No'}<br>"
-
-            self.abuseipdb_results_browser.setHtml(html)
-
-        except Exception as e:
-            self.abuseipdb_results_browser.setText(f"Failed to format result: {e}\n\n{json.dumps(data, indent=4)}")
 
     def _handle_cve_search_status(self, status_text):
         self.status_bar.showMessage(status_text, 5000)
@@ -10608,7 +10412,7 @@ class Zurvan(QMainWindow):
         doc = SimpleDocTemplate(file_path)
         elements = []
         styles = getSampleStyleSheet()
-        elements.append(Paragraph("GScapy Exported Results", styles['h1']))
+        elements.append(Paragraph("Exported Results", styles['h1']))
 
         header = [tree_widget.headerItem().text(i) for i in range(tree_widget.columnCount())]
         data = [header]
@@ -10632,7 +10436,7 @@ class Zurvan(QMainWindow):
 
     def _export_to_docx(self, tree_widget, file_path):
         document = docx.Document()
-        document.add_heading('GScapy Exported Results', 0)
+        document.add_heading('Exported Results', 0)
 
         header = [tree_widget.headerItem().text(i) for i in range(tree_widget.columnCount())]
 
@@ -10691,7 +10495,7 @@ class Zurvan(QMainWindow):
             if self.channel_hopper and self.channel_hopper.isRunning(): self.channel_hopper.stop()
             if self.resource_monitor_thread and self.resource_monitor_thread.isRunning():
                 self.resource_monitor_thread.stop()
-            logging.info("GScapy application closing.")
+            logging.info("Zurvan application closing.")
             event.accept()
         else:
             logging.info("User canceled exit.")
@@ -10785,6 +10589,16 @@ class Zurvan(QMainWindow):
         self.report_aggregate_btn.setToolTip("Scan the results from all tool outputs in the current session and enrich them with CVE and Exploit-DB information.")
         self.report_aggregate_btn.clicked.connect(self._handle_aggregation)
         aggregation_controls.addWidget(self.report_aggregate_btn)
+
+        self.import_cve_db_btn = QPushButton(QIcon("icons/folder.svg"), "Import NVD File")
+        self.import_cve_db_btn.setToolTip("Import a manually downloaded NVD JSON feed (*.json.gz).")
+        self.import_cve_db_btn.clicked.connect(self._start_cve_import)
+        aggregation_controls.addWidget(self.import_cve_db_btn)
+
+        self.update_cve_db_btn = QPushButton(QIcon("icons/download-cloud.svg"), "Update Offline DB (Info)")
+        self.update_cve_db_btn.setToolTip("Show instructions for manually updating the offline CVE database.")
+        self.update_cve_db_btn.clicked.connect(self._show_cve_update_info)
+        aggregation_controls.addWidget(self.update_cve_db_btn)
         aggregation_controls.addStretch()
         self.offline_cve_check = QCheckBox("Use offline CVE_DB")
         self.offline_cve_check.setToolTip("Use a local copy of CVE data for enrichment. Requires initial download.")
@@ -10798,9 +10612,8 @@ class Zurvan(QMainWindow):
         self.report_findings_tree.header().setStretchLastSection(True)
         findings_layout.addWidget(self.report_findings_tree)
 
-        # Add the reusable CVE manager widget here
-        self.reporting_cve_manager = OfflineCveManagerWidget(self)
-        findings_layout.addWidget(self.reporting_cve_manager)
+        self.cve_import_status_label = QLabel("Status: Idle")
+        findings_layout.addWidget(self.cve_import_status_label)
 
         right_layout.addWidget(findings_box)
 
@@ -11325,7 +11138,7 @@ def main():
         window.current_user = login_dialog.current_user
         # Set window title with username
         if window.current_user and 'username' in window.current_user:
-            window.setWindowTitle(f"Welcome, {window.current_user['username']} - Zurvan + AI - The Modern Scapy Interface with AI")
+            window.setWindowTitle(f"Welcome, {window.current_user['username']} - Zurvan - Comprehensive AI-Powered Security Platform")
         window._update_menu_bar() # Populate the menu now that we have a user
         window._set_user_avatar() # Set avatar after user is loaded
         window.show()

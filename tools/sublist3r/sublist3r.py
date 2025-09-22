@@ -1017,7 +1017,7 @@ def interactive():
         no_color()
     banner()
     res = main(domain, threads, savefile, ports, silent=False, verbose=verbose, enable_bruteforce=enable_bruteforce, engines=engines)
-    # GScapy change: Print final results as JSON for easy parsing.
+    # Zurvan change: Print final results as JSON for easy parsing.
     print(json.dumps(list(res)))
 
 if __name__ == "__main__":

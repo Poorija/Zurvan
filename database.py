@@ -328,14 +328,6 @@ def set_user_active_status(user_id, is_active):
     conn.commit()
     conn.close()
 
-def set_user_admin_status(user_id, is_admin):
-    """Updates the is_admin status for a given user."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET is_admin = ? WHERE id = ?", (int(is_admin), user_id))
-    conn.commit()
-    conn.close()
-
 def update_user_password(user_id, new_password):
     """Updates the password for a given user."""
     conn = get_db_connection()
@@ -430,6 +422,59 @@ def delete_history_entry(entry_id):
     conn.commit()
     conn.close()
 
+def create_cve_table():
+    """Creates the vulnerabilities table in the CVE database if it doesn't exist."""
+    # Note: This connects to a separate database file.
+    conn = sqlite3.connect("cve.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS vulnerabilities (
+        cve_id TEXT PRIMARY KEY,
+        description TEXT,
+        cvss_v3_score REAL,
+        cvss_v2_score REAL,
+        keywords TEXT,
+        published_date TEXT
+    )
+    """)
+    # Create an index for faster keyword searches
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_keywords ON vulnerabilities(keywords)")
+    conn.commit()
+    conn.close()
+    logging.info("CVE database table 'vulnerabilities' created or already exists.")
+
+def get_cve_data(filter_text, sort_column, sort_order, page, page_size):
+    """Fetches paginated and sorted CVE data from the offline database."""
+    conn = sqlite3.connect("cve.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    offset = page * page_size
+    # Basic sanitization for column name
+    allowed_columns = ['cve_id', 'cvss_v3_score', 'cvss_v2_score', 'published_date']
+    if sort_column not in allowed_columns:
+        sort_column = 'published_date' # Default sort
+
+    # Basic sanitization for sort order
+    sort_order = "DESC" if sort_order.upper() == "DESC" else "ASC"
+
+    query = f"SELECT cve_id, description, cvss_v3_score, published_date FROM vulnerabilities WHERE description LIKE ? ORDER BY {sort_column} {sort_order} LIMIT ? OFFSET ?"
+    params = (f'%{filter_text}%', page_size, offset)
+
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+def get_cve_total_count(filter_text):
+    """Gets the total number of CVEs that match the filter."""
+    conn = sqlite3.connect("cve.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM vulnerabilities WHERE description LIKE ?", (f'%{filter_text}%',))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
 def initialize_database():
     """
     Initializes the database: creates tables and the default admin user.
@@ -438,6 +483,7 @@ def initialize_database():
     logging.info("Initializing database...")
     create_tables()
     create_admin_user()
+    create_cve_table()
     logging.info("Database initialization complete.")
 
 if __name__ == '__main__':

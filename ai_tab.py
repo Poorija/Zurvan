@@ -336,7 +336,7 @@ class AIGuideDialog(QDialog):
     """A dialog to show the user guide for AI features."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("AI Features Guide for GScapy + AI")
+        self.setWindowTitle("AI Features Guide for Zurvan")
         self.setMinimumSize(700, 500)
 
         layout = QVBoxLayout(self)
@@ -357,10 +357,10 @@ class AIGuideDialog(QDialog):
         </head>
         <body>
             <h1>AI Integration Guide (v3.0)</h1>
-            <p>This guide explains how to set up and use the new AI analysis features within <b>GScapy + AI</b>.</p>
+            <p>This guide explains how to set up and use the new AI analysis features within <b>Zurvan</b>.</p>
 
             <h2>1. Setting Up an AI Service</h2>
-            <p>GScapy's AI features work by connecting to a Large Language Model (LLM). You can use a local service that you run on your own machine (ensuring privacy) or an online provider.</p>
+            <p>Zurvan's AI features work by connecting to a Large Language Model (LLM). You can use a local service that you run on your own machine (ensuring privacy) or an online provider.</p>
 
             <h3>Local AI (Recommended)</h3>
             <p>We recommend using <b>Ollama</b> or <b>LMStudio</b>.</p>
@@ -373,8 +373,8 @@ class AIGuideDialog(QDialog):
             <h3>Online AI</h3>
             <p>You can also connect to providers like OpenAI. You will need an API key from the provider.</p>
 
-            <h2>2. Configuring GScapy + AI</h2>
-            <p>You must tell GScapy how to connect to your chosen AI service.</p>
+            <h2>2. Configuring Zurvan</h2>
+            <p>You must tell Zurvan how to connect to your chosen AI service.</p>
             <ol>
                 <li>In the 'AI Assistant' tab, click the settings icon &#x2699; next to the 'Send' button.</li>
                 <li>Click 'Advanced Settings...' to open the main configuration dialog.</li>
@@ -651,7 +651,7 @@ class ChatBubble(QFrame):
 class AIAssistantTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.parent = parent # GScapy main window instance
+        self.parent = parent # Zurvan main window instance
         self.thinking_widget = None
         self.current_ai_bubble = None
         self.ai_thread = None
@@ -788,7 +788,7 @@ class AIAssistantTab(QWidget):
         header = QTextBrowser()
         header.setHtml("""
             <div align="center">
-                <h2>GScapy + AI Assistant</h2>
+                <h2>Zurvan AI Assistant</h2>
                 <p>Your smart, context-aware cybersecurity assistant.</p>
             </div>
         """)
