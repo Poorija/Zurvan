@@ -110,6 +110,86 @@ def sniffer_process_target(queue, iface, bpf_filter):
         logging.error(f"Critical error in sniffer process: {e}", exc_info=True)
 
 
+class OfflineCveManagerWidget(QWidget):
+    """A reusable widget for managing the offline CVE database."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_window = parent
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 10, 0, 10)
+
+        controls_box = QGroupBox("Offline NVD Database Management")
+        controls_layout = QHBoxLayout(controls_box)
+
+        self.import_cve_db_btn = QPushButton(QIcon("icons/folder.svg"), "Import NVD File(s)")
+        self.import_cve_db_btn.setToolTip("Import one or more manually downloaded NVD JSON feeds (*.json.gz).")
+        self.import_cve_db_btn.clicked.connect(self._start_cve_import)
+        controls_layout.addWidget(self.import_cve_db_btn)
+
+        self.update_cve_db_btn = QPushButton(QIcon("icons/download-cloud.svg"), "Update Info")
+        self.update_cve_db_btn.setToolTip("Show instructions for manually updating the offline CVE database.")
+        self.update_cve_db_btn.clicked.connect(self._show_cve_update_info)
+        controls_layout.addWidget(self.update_cve_db_btn)
+
+        controls_layout.addStretch()
+
+        self.cve_import_status_label = QLabel("Status: Idle")
+        controls_layout.addWidget(self.cve_import_status_label)
+
+        layout.addWidget(controls_box)
+
+        # Connect to the parent window's signal to receive updates
+        if self.parent_window:
+            self.parent_window.cve_db_updated.connect(self.update_status_label)
+            # Initial status check
+            self.update_status_label()
+
+    def update_status_label(self):
+        """Checks the DB and updates the status label with the record count."""
+        try:
+            if os.path.exists("cve.db"):
+                con = sqlite3.connect("cve.db")
+                cur = con.cursor()
+                cur.execute("SELECT count(*) FROM vulnerabilities")
+                count = cur.fetchone()[0]
+                con.close()
+                self.cve_import_status_label.setText(f"Status: {count:,} records loaded.")
+            else:
+                self.cve_import_status_label.setText("Status: Database not found.")
+        except Exception as e:
+            self.cve_import_status_label.setText("Status: Error checking DB.")
+            logging.error(f"Could not check CVE DB status: {e}")
+
+    def _show_cve_update_info(self):
+        QMessageBox.information(self, "Manual CVE Database Update",
+            "Automatic downloads from the National Vulnerability Database (NVD) are currently blocked by their security provider (Cloudflare).\n\n"
+            "To update the offline database, please follow these steps:\n"
+            "1. Go to the NVD Data Feeds page: https://nvd.nist.gov/vuln/data-feeds\n"
+            "2. Download the desired JSON feeds (e.g., 'nvdcve-1.1-modified.json.gz', 'nvdcve-1.1-2023.json.gz', etc.).\n"
+            "3. Return to this tab and click the 'Import NVD File' button.\n"
+            "4. Select the downloaded `.json.gz` file(s) to import them into the local database.")
+
+    def _start_cve_import(self):
+        """Starts the background thread to import local CVE files."""
+        if self.parent_window and self.parent_window.is_tool_running:
+            QMessageBox.warning(self, "Busy", "Another tool is already running.")
+            return
+
+        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select NVD JSON Feed(s)", "", "NVD JSON Files (*.json.gz)", options=QFileDialog.Option.DontUseNativeDialog)
+        if not file_paths:
+            return
+
+        if self.parent_window:
+            self.parent_window.is_tool_running = True
+        self.import_cve_db_btn.setEnabled(False)
+        self.parent_window.status_bar.showMessage("Starting CVE database import...")
+
+        # Note: The thread is still a method of the main window for simplicity of queue handling
+        self.worker = WorkerThread(self.parent_window._cve_import_thread, args=(file_paths,))
+        self.parent_window.active_threads.append(self.worker)
+        self.worker.start()
+
 class KrackScanThread(QThread):
     vulnerability_detected = pyqtSignal(str, str) # bssid, client_mac
 
@@ -1172,9 +1252,57 @@ class SherlockResultsDialog(QDialog):
             logging.error(f"Error parsing Sherlock CSV: {e}")
             self.tree.addTopLevelItem(QTreeWidgetItem([f"An unexpected error occurred: {e}"]))
 
+class TorGuideDialog(QDialog):
+    """A dialog that shows a guide on how to install Tor."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Tor Installation Guide")
+        self.setMinimumSize(600, 400)
+
+        layout = QVBoxLayout(self)
+        text_browser = QTextBrowser()
+        text_browser.setOpenExternalLinks(True)
+
+        guide_html = """
+        <h1>Tor Installation Guide</h1>
+        <p>To use the Tor proxy feature, you need to have Tor running and listening on the default SOCKS port (9050). The easiest way to do this is by installing and running the <b>Tor Browser</b>.</p>
+
+        <h3>Step 1: Download Tor Browser</h3>
+        <p>Go to the official Tor Project website to download the browser for your operating system: <a href="https://www.torproject.org/download/">https://www.torproject.org/download/</a></p>
+
+        <h3>Step 2: Install and Run</h3>
+        <h4>For Windows & macOS:</h4>
+        <ol>
+            <li>Run the downloaded installer and follow the on-screen instructions.</li>
+            <li>Once installed, launch the Tor Browser.</li>
+            <li>Click the "Connect" button. This will start the Tor service in the background.</li>
+            <li>You can minimize the Tor Browser window, but <b>do not close it</b> while you want to use the proxy feature in this application.</li>
+        </ol>
+
+        <h4>For Linux (Debian/Ubuntu):</h4>
+        <ol>
+            <li>Open a terminal.</li>
+            <li>Install the `torbrowser-launcher` package: <code>sudo apt update && sudo apt install torbrowser-launcher</code></li>
+            <li>Run it from your application menu or by typing <code>torbrowser-launcher</code> in the terminal.</li>
+            <li>The launcher will download, verify, and run the Tor Browser for you. Click "Connect" when it starts.</li>
+            <li>You can minimize the Tor Browser window, but <b>do not close it</b> while you want to use the proxy feature.</li>
+        </ol>
+
+        <h3>Step 3: Verify Connection</h3>
+        <p>Once the Tor Browser is running and connected, you can return to this application and check the "Use Tor Proxy" box again. It should now connect successfully.</p>
+        """
+        text_browser.setHtml(guide_html)
+        layout.addWidget(text_browser)
+
+        ok_button = QPushButton("OK")
+        ok_button.clicked.connect(self.accept)
+        layout.addWidget(ok_button)
+
 # --- Main Application ---
 class Zurvan(QMainWindow):
     """The main application window, holding all UI elements and logic."""
+    cve_db_updated = pyqtSignal()
+
     def __init__(self):
         """Initializes the main window, UI components, and internal state."""
         super().__init__()
@@ -1668,10 +1796,10 @@ class Zurvan(QMainWindow):
         """Handles the logic when the 'Use Tor Proxy' checkbox is toggled."""
         if checked:
             if not self._check_tor_proxy():
-                QMessageBox.warning(self, "Tor Proxy Unavailable",
-                                    "Could not connect to the Tor proxy at socks5://127.0.0.1:9050.\n"
-                                    "Please ensure Tor is running and configured correctly.")
-                self.tor_proxy_check.setChecked(False) # Uncheck the box
+                # Instead of a simple QMessageBox, show the detailed guide.
+                guide_dialog = TorGuideDialog(self)
+                guide_dialog.exec()
+                self.tor_proxy_check.setChecked(False) # Uncheck the box after showing the guide
                 return
 
         self._update_tool_availability()
@@ -1736,6 +1864,17 @@ class Zurvan(QMainWindow):
         threat_tabs = QTabWidget()
         threat_tabs.addTab(self._create_recent_threats_tab(), "Recent Threats")
         threat_tabs.addTab(self._create_exploit_db_search_tab(), "Exploit-DB Search")
+        threat_tabs.addTab(self._create_urlscan_tab(), "URL Scanner (urlscan.io)")
+        threat_tabs.addTab(self._create_abuseipdb_tab(), "IP Reputation (AbuseIPDB)")
+
+        # Create a new tab for the offline DB manager
+        offline_db_tab = QWidget()
+        offline_db_layout = QVBoxLayout(offline_db_tab)
+        self.ti_cve_manager = OfflineCveManagerWidget(self)
+        offline_db_layout.addWidget(self.ti_cve_manager)
+        offline_db_layout.addStretch() # Pushes the widget to the top
+        threat_tabs.addTab(offline_db_tab, "Offline Database")
+
         return threat_tabs
 
     def _create_history_tab(self):
@@ -2020,6 +2159,196 @@ class Zurvan(QMainWindow):
         self.load_vulners_api_key()
 
         return widget
+
+    def _create_urlscan_tab(self):
+        """Creates the UI for the urlscan.io tool."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        controls_layout = QHBoxLayout()
+        controls_layout.addWidget(QLabel("URL to Scan:"))
+        self.urlscan_input = QLineEdit()
+        self.urlscan_input.setPlaceholderText("e.g., https://example.com")
+        controls_layout.addWidget(self.urlscan_input)
+        self.urlscan_button = QPushButton("Scan URL")
+        controls_layout.addWidget(self.urlscan_button)
+        layout.addLayout(controls_layout)
+
+        self.urlscan_results_browser = QTextBrowser()
+        self.urlscan_results_browser.setOpenExternalLinks(True)
+        layout.addWidget(self.urlscan_results_browser)
+
+        self.urlscan_button.clicked.connect(self.start_urlscan)
+        return widget
+
+    def start_urlscan(self):
+        """Starts the urlscan.io worker thread."""
+        if self.is_tool_running:
+            QMessageBox.warning(self, "Busy", "Another tool is already running.")
+            return
+
+        url_to_scan = self.urlscan_input.text().strip()
+        if not url_to_scan:
+            QMessageBox.warning(self, "Input Error", "Please enter a URL to scan.")
+            return
+
+        self.is_tool_running = True
+        self.urlscan_button.setEnabled(False)
+        self.urlscan_results_browser.setText("Submitting URL to urlscan.io...")
+
+        self.worker = WorkerThread(self._urlscan_thread, args=(url_to_scan,))
+        self.active_threads.append(self.worker)
+        self.worker.start()
+
+    def _urlscan_thread(self, url_to_scan):
+        """Worker thread to submit a URL to urlscan.io and poll for results."""
+        q = self.tool_results_queue
+        try:
+            # Step 1: Submit the URL for scanning
+            submit_url = 'https://urlscan.io/api/v1/scan/'
+            data = urllib.parse.urlencode({'url': url_to_scan, 'visibility': 'public'}).encode('ascii')
+
+            req = urllib.request.Request(submit_url, data=data, headers={'Content-Type': 'application/json'})
+            with urllib.request.urlopen(req, timeout=20) as response:
+                submit_result = json.load(response)
+
+            if submit_result.get('message') != 'Submission successful':
+                raise Exception(f"API submission failed: {submit_result.get('message', 'Unknown error')}")
+
+            result_api_url = submit_result.get('api')
+            q.put(('urlscan_status', f"URL submitted. Waiting for results from: {submit_result.get('result')}"))
+
+            # Step 2: Poll the result URL until it's ready
+            for _ in range(30): # Poll for up to 5 minutes (30 * 10s)
+                time.sleep(10)
+                try:
+                    with urllib.request.urlopen(result_api_url, timeout=10) as poll_response:
+                        if poll_response.status == 200:
+                            scan_result = json.load(poll_response)
+                            q.put(('urlscan_result', scan_result))
+                            q.put(('tool_finished', 'urlscan', url_to_scan, "Scan complete."))
+                            return
+                except urllib.error.HTTPError as e:
+                    if e.code == 404:
+                        q.put(('urlscan_status', "Scan is still in progress, waiting..."))
+                        continue # Not ready yet, keep polling
+                    else:
+                        raise # A different error occurred
+
+            raise Exception("Scan timed out after 5 minutes.")
+
+        except Exception as e:
+            logging.error(f"urlscan.io thread failed: {e}", exc_info=True)
+            q.put(('error', 'urlscan.io Error', str(e)))
+        finally:
+            q.put(('tool_finished', 'urlscan', url_to_scan))
+
+    def _create_abuseipdb_tab(self):
+        """Creates the UI for the AbuseIPDB tool."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # API Key Input
+        api_key_layout = QHBoxLayout()
+        api_key_layout.addWidget(QLabel("AbuseIPDB API Key:"))
+        self.abuseipdb_api_key_input = QLineEdit()
+        self.abuseipdb_api_key_input.setPlaceholderText("Get a free key from abuseipdb.com")
+        self.abuseipdb_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        api_key_layout.addWidget(self.abuseipdb_api_key_input)
+        save_api_key_btn = QPushButton("Save Key")
+        api_key_layout.addWidget(save_api_key_btn)
+        layout.addLayout(api_key_layout)
+
+        # IP Input and Search
+        controls_layout = QHBoxLayout()
+        controls_layout.addWidget(QLabel("IP Address to Check:"))
+        self.abuseipdb_input = QLineEdit()
+        self.abuseipdb_input.setPlaceholderText("e.g., 8.8.8.8")
+        controls_layout.addWidget(self.abuseipdb_input)
+        self.abuseipdb_button = QPushButton("Check IP")
+        controls_layout.addWidget(self.abuseipdb_button)
+        layout.addLayout(controls_layout)
+
+        self.abuseipdb_results_browser = QTextBrowser()
+        self.abuseipdb_results_browser.setOpenExternalLinks(True)
+        layout.addWidget(self.abuseipdb_results_browser)
+
+        save_api_key_btn.clicked.connect(self.save_abuseipdb_api_key)
+        self.abuseipdb_button.clicked.connect(self.start_abuseipdb_check)
+        self.load_abuseipdb_api_key() # Load saved key on startup
+
+        return widget
+
+    def save_abuseipdb_api_key(self):
+        """Saves the AbuseIPDB API key to a file."""
+        api_key = self.abuseipdb_api_key_input.text()
+        if not api_key:
+            QMessageBox.warning(self, "Input Error", "Please enter an API key to save.")
+            return
+        try:
+            with open("abuseipdb_api.key", "w") as f:
+                f.write(api_key)
+            QMessageBox.information(self, "Success", "AbuseIPDB API key saved successfully.")
+        except Exception as e:
+            QMessageBox.critical(self, "File Error", f"Could not save API key: {e}")
+
+    def load_abuseipdb_api_key(self):
+        """Loads the AbuseIPDB API key from a file."""
+        try:
+            with open("abuseipdb_api.key", "r") as f:
+                api_key = f.read().strip()
+                self.abuseipdb_api_key_input.setText(api_key)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            QMessageBox.critical(self, "File Error", f"Could not load API key: {e}")
+
+    def start_abuseipdb_check(self):
+        """Starts the AbuseIPDB worker thread."""
+        if self.is_tool_running:
+            QMessageBox.warning(self, "Busy", "Another tool is already running.")
+            return
+
+        ip_to_check = self.abuseipdb_input.text().strip()
+        api_key = self.abuseipdb_api_key_input.text().strip()
+
+        if not ip_to_check:
+            QMessageBox.warning(self, "Input Error", "Please enter an IP address to check.")
+            return
+        if not api_key:
+            QMessageBox.warning(self, "API Key Error", "AbuseIPDB API key is required.")
+            return
+
+        self.is_tool_running = True
+        self.abuseipdb_button.setEnabled(False)
+        self.abuseipdb_results_browser.setText(f"Checking IP: {ip_to_check}...")
+
+        self.worker = WorkerThread(self._abuseipdb_thread, args=(ip_to_check, api_key))
+        self.active_threads.append(self.worker)
+        self.worker.start()
+
+    def _abuseipdb_thread(self, ip_address, api_key):
+        """Worker thread to check an IP against AbuseIPDB."""
+        q = self.tool_results_queue
+        try:
+            url = f'https://api.abuseipdb.com/api/v2/check'
+            querystring = {'ipAddress': ip_address, 'maxAgeInDays': '90'}
+            headers = {'Accept': 'application/json', 'Key': api_key}
+
+            req = urllib.request.Request(f"{url}?{urllib.parse.urlencode(querystring)}", headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as response:
+                result = json.load(response)
+
+            if 'errors' in result:
+                raise Exception(result['errors'][0]['detail'])
+
+            q.put(('abuseipdb_result', result.get('data', {})))
+
+        except Exception as e:
+            logging.error(f"AbuseIPDB thread failed: {e}", exc_info=True)
+            q.put(('error', 'AbuseIPDB Error', str(e)))
+        finally:
+            q.put(('tool_finished', 'abuseipdb_check', ip_address))
 
     def save_vulners_api_key(self):
         """Saves the Vulners API key to a file."""
@@ -9309,9 +9638,14 @@ class Zurvan(QMainWindow):
         self.result_handlers['report_finding'] = self._handle_report_finding
         self.result_handlers['recent_threats_result'] = self._handle_recent_threats_result
         self.result_handlers['cve_import_finished'] = self._handle_cve_import_finished
+        self.result_handlers['urlscan_status'] = self._handle_urlscan_status
+        self.result_handlers['urlscan_result'] = self._handle_urlscan_result
+        self.result_handlers['abuseipdb_result'] = self._handle_abuseipdb_result
 
     def _handle_cve_import_finished(self, success, total_records, error_message):
         """Shows a confirmation message after the CVE import process is complete."""
+        self.cve_db_updated.emit() # Notify all widgets to update their status
+
         if success:
             QMessageBox.information(self, "Import Successful",
                 f"Successfully imported {total_records} records into the offline CVE database.\n\n"
@@ -9320,8 +9654,6 @@ class Zurvan(QMainWindow):
             QMessageBox.critical(self, "Import Failed",
                 f"The CVE import process failed with an error:\n\n{error_message}\n\n"
                 "Please check the log for more details.")
-        # Reset the status label
-        self.cve_import_status_label.setText("Status: Idle")
 
     def _handle_report_finished(self, success, message):
         """Handles the result of the report generation thread."""
@@ -10071,6 +10403,14 @@ class Zurvan(QMainWindow):
             self.is_tool_running = False # Explicitly set this as it's a special case
             return
 
+        if tool == 'cve_import':
+            # This tool is special, its button is on a reusable widget
+            # We can find all instances and re-enable them.
+            for manager_widget in self.findChildren(OfflineCveManagerWidget):
+                manager_widget.import_cve_db_btn.setEnabled(True)
+            self.is_tool_running = False
+            return
+
         self.is_tool_running = False
         buttons = {'traceroute': self.trace_button, 'scanner': self.scan_button, 'arp_scan': self.arp_scan_button,
                    'flooder': self.flood_button, 'fw_tester': self.fw_test_button, 'wifi_scan': self.wifi_scan_button,
@@ -10110,6 +10450,68 @@ class Zurvan(QMainWindow):
             status_labels = {'scanner': self.scan_status, 'traceroute': self.trace_status}
             if tool in status_labels:
                 status_labels[tool].setText("Canceled by user.")
+
+    def _handle_urlscan_status(self, status_text):
+        """Updates the status in the urlscan results browser."""
+        self.urlscan_results_browser.setText(status_text)
+
+    def _handle_urlscan_result(self, result):
+        """Formats and displays the final urlscan.io JSON result."""
+        self.urlscan_button.setEnabled(True)
+        try:
+            # A more advanced implementation could pull out specific interesting fields.
+            # For now, just display the pretty-printed JSON.
+
+            # Extract key information for a more readable summary
+            page_info = result.get('page', {})
+            verdicts = result.get('verdicts', {}).get('overall', {})
+
+            html = f"<h3>Scan Report for: {page_info.get('url', 'N/A')}</h3>"
+            html += f"<b>Overall Verdict:</b> {verdicts.get('malicious', False)} (Score: {verdicts.get('score', 0)})<br>"
+            html += f"<b>Scanned from:</b> {result.get('task', {}).get('location', 'N/A')}<br>"
+            html += f"<b>Report URL:</b> <a href='{result.get('result')}'>{result.get('result')}</a><br>"
+            html += f"<b>Screenshot:</b> <a href='{result.get('screenshot')}'>View Screenshot</a><br>"
+
+            html += "<h4>Page Details:</h4>"
+            html += f"<ul>"
+            html += f"<li><b>Title:</b> {page_info.get('title', 'N/A')}</li>"
+            html += f"<li><b>IP Address:</b> {page_info.get('ip', 'N/A')}</li>"
+            html += f"<li><b>Country:</b> {page_info.get('country', 'N/A')}</li>"
+            html += f"<li><b>Server:</b> {page_info.get('server', 'N/A')}</li>"
+            html += "</ul>"
+
+            self.urlscan_results_browser.setHtml(html)
+
+        except Exception as e:
+            self.urlscan_results_browser.setText(f"Failed to format result: {e}\n\n{json.dumps(result, indent=4)}")
+
+    def _handle_abuseipdb_result(self, data):
+        """Formats and displays the final AbuseIPDB JSON result."""
+        self.abuseipdb_button.setEnabled(True)
+        try:
+            if not data:
+                self.abuseipdb_results_browser.setText("No data returned for this IP address.")
+                return
+
+            confidence_score = data.get('abuseConfidenceScore', 0)
+            country = data.get('countryCode', 'N/A')
+            isp = data.get('isp', 'N/A')
+            domain = data.get('domain', 'N/A')
+            total_reports = data.get('totalReports', 0)
+            is_whitelisted = data.get('isWhitelisted', False)
+
+            html = f"<h3>Report for: {data.get('ipAddress')}</h3>"
+            html += f"<b>Abuse Confidence Score:</b> {confidence_score}%<br>"
+            html += f"<b>Total Reports:</b> {total_reports}<br>"
+            html += f"<b>Country:</b> {country}<br>"
+            html += f"<b>ISP:</b> {isp}<br>"
+            html += f"<b>Domain:</b> {domain}<br>"
+            html += f"<b>Whitelisted:</b> {'Yes' if is_whitelisted else 'No'}<br>"
+
+            self.abuseipdb_results_browser.setHtml(html)
+
+        except Exception as e:
+            self.abuseipdb_results_browser.setText(f"Failed to format result: {e}\n\n{json.dumps(data, indent=4)}")
 
     def _handle_cve_search_status(self, status_text):
         self.status_bar.showMessage(status_text, 5000)
@@ -10383,16 +10785,6 @@ class Zurvan(QMainWindow):
         self.report_aggregate_btn.setToolTip("Scan the results from all tool outputs in the current session and enrich them with CVE and Exploit-DB information.")
         self.report_aggregate_btn.clicked.connect(self._handle_aggregation)
         aggregation_controls.addWidget(self.report_aggregate_btn)
-
-        self.import_cve_db_btn = QPushButton(QIcon("icons/folder.svg"), "Import NVD File")
-        self.import_cve_db_btn.setToolTip("Import a manually downloaded NVD JSON feed (*.json.gz).")
-        self.import_cve_db_btn.clicked.connect(self._start_cve_import)
-        aggregation_controls.addWidget(self.import_cve_db_btn)
-
-        self.update_cve_db_btn = QPushButton(QIcon("icons/download-cloud.svg"), "Update Offline DB (Info)")
-        self.update_cve_db_btn.setToolTip("Show instructions for manually updating the offline CVE database.")
-        self.update_cve_db_btn.clicked.connect(self._show_cve_update_info)
-        aggregation_controls.addWidget(self.update_cve_db_btn)
         aggregation_controls.addStretch()
         self.offline_cve_check = QCheckBox("Use offline CVE_DB")
         self.offline_cve_check.setToolTip("Use a local copy of CVE data for enrichment. Requires initial download.")
@@ -10406,8 +10798,9 @@ class Zurvan(QMainWindow):
         self.report_findings_tree.header().setStretchLastSection(True)
         findings_layout.addWidget(self.report_findings_tree)
 
-        self.cve_import_status_label = QLabel("Status: Idle")
-        findings_layout.addWidget(self.cve_import_status_label)
+        # Add the reusable CVE manager widget here
+        self.reporting_cve_manager = OfflineCveManagerWidget(self)
+        findings_layout.addWidget(self.reporting_cve_manager)
 
         right_layout.addWidget(findings_box)
 
