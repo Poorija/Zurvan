@@ -1,6 +1,7 @@
 import sys
 import random
 import os
+import re
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QStackedWidget, QFormLayout, QMessageBox, QGroupBox, QComboBox,
@@ -228,24 +229,24 @@ class LoginDialog(QDialog):
         script_dir = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(script_dir, "icons", "Zurvan.png")
         pixmap = QPixmap(icon_path)
-        self.logo_label.setPixmap(pixmap.scaled(120, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.logo_label.setPixmap(pixmap.scaled(180, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         header_layout.addWidget(self.logo_label)
 
         # Text container
         text_widget = QWidget()
         text_layout = QVBoxLayout(text_widget)
         text_layout.setContentsMargins(0,0,0,0)
-        text_layout.setSpacing(0)
+        text_layout.setSpacing(5)
 
         # App Name
         app_name_label = QLabel("Zurvan")
-        app_name_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #bbbbbb;")
+        app_name_label.setStyleSheet("font-size: 28px; font-weight: bold; color: #cccccc;")
         app_name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         text_layout.addWidget(app_name_label)
 
         # Slogan
-        slogan_label = QLabel("The Modern Scapy Interface, now with AI capabilities.")
-        slogan_label.setStyleSheet("font-size: 14px; color: #888888;")
+        slogan_label = QLabel("Your All-in-One Penetration Testing Toolkit.")
+        slogan_label.setStyleSheet("font-size: 16px; color: #999999;")
         slogan_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         text_layout.addWidget(slogan_label)
 
@@ -277,6 +278,7 @@ class LoginDialog(QDialog):
         # Add the two main views (the login stack and the register page) to the main stacked widget
         self.stacked_widget.addWidget(self.login_page_stack)
         self.stacked_widget.addWidget(self.register_page)
+        self.stacked_widget.currentChanged.connect(self.adjustSize) # Adjust size when switching pages
 
         self.lockout_end_time = None
         self.lockout_timer = QTimer(self)
@@ -407,7 +409,7 @@ class LoginDialog(QDialog):
         login_box.setStyleSheet("QGroupBox { border: 1px solid #444; padding: 15px; }")
 
         self.login_form_layout = QFormLayout(login_box)
-        self.login_form_layout.setVerticalSpacing(15)
+        self.login_form_layout.setVerticalSpacing(20)
 
         # --- Lockout UI ---
         self.lockout_widget = QWidget()
@@ -504,7 +506,7 @@ class LoginDialog(QDialog):
         register_box = QGroupBox("Create New Account")
         register_box.setStyleSheet("QGroupBox { border: 1px solid #444; padding: 15px; }")
         form_layout = QFormLayout(register_box)
-        form_layout.setVerticalSpacing(15)
+        form_layout.setVerticalSpacing(20)
 
         self.reg_username_edit = QLineEdit()
         self.reg_email_edit = QLineEdit()
@@ -864,7 +866,7 @@ class LoginDialog(QDialog):
             return
 
         # Always check for existing lockout first
-        user_or_status = database.verify_user(username, "dummypass_for_status_check")
+        user_or_status = database.verify_user(username, "dummypass_for_status_check", is_status_check=True)
         if isinstance(user_or_status, str) and user_or_status.startswith('locked:'):
             self._handle_lockout_message(user_or_status)
             return
@@ -872,11 +874,12 @@ class LoginDialog(QDialog):
         # Check captcha
         if not captcha_input or (captcha_input.upper() != self.captcha_text.upper()):
             QMessageBox.warning(self, "Login Failed", "Incorrect captcha. Please try again.")
+            # A failed captcha is still a failed attempt against the user.
             database.register_failed_login_attempt(username)
-            self._refresh_captcha()
+            self._refresh_captcha('login')
             self.captcha_input_edit.clear()
             # Check if this failed attempt caused a lockout
-            user_or_status = database.verify_user(username, "dummypass_for_status_check")
+            user_or_status = database.verify_user(username, "dummypass_for_status_check", is_status_check=True)
             if isinstance(user_or_status, str) and user_or_status.startswith('locked:'):
                 self._handle_lockout_message(user_or_status)
             return
@@ -889,11 +892,12 @@ class LoginDialog(QDialog):
             QMessageBox.information(self, "Success", f"Welcome, {self.current_user['username']}!")
             self.accept()
         else:
+            # This block runs on password failure
             QMessageBox.warning(self, "Login Failed", "Invalid username or password.")
-            self._refresh_captcha()
+            self._refresh_captcha('login')
             self.captcha_input_edit.clear()
             # Check if this failed attempt caused a lockout
-            user_or_status = database.verify_user(username, "dummypass_for_status_check")
+            user_or_status = database.verify_user(username, "dummypass_for_status_check", is_status_check=True)
             if isinstance(user_or_status, str) and user_or_status.startswith('locked:'):
                 self._handle_lockout_message(user_or_status)
 
@@ -907,6 +911,10 @@ class LoginDialog(QDialog):
         # --- Validation ---
         if not all([username, email, password, confirm_password, captcha_input]):
             QMessageBox.warning(self, "Input Error", "All fields are required.")
+            return
+
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+            QMessageBox.warning(self, "Input Error", "Please enter a valid email address.")
             return
 
         if captcha_input.upper() != self.reg_captcha_text.upper():

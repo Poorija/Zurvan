@@ -24,6 +24,9 @@ import uuid
 import sqlite3
 import gzip
 from datetime import datetime
+import hashlib
+
+from app_lock import AppLockDialog
 
 try:
     from lxml import etree
@@ -90,8 +93,28 @@ from login import LoginDialog
 from admin_panel import AdminPanelDialog
 from user_profile import UserProfileDialog
 from offline_cve_manager import OfflineCveManagerWidget
-from PyQt6.QtCore import QObject, pyqtSignal, Qt, QThread, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSequentialAnimationGroup, QPoint, QSize, QAbstractTableModel, QDate
+from PyQt6.QtCore import QObject, pyqtSignal, Qt, QThread, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSequentialAnimationGroup, QPoint, QSize, QAbstractTableModel, QDate, QEvent
 from PyQt6.QtGui import QAction, QIcon, QFont, QTextCursor, QActionGroup
+
+class ActivityMonitorEventFilter(QObject):
+    """An event filter that monitors for user activity and emits a signal."""
+    user_active = pyqtSignal()
+
+    def eventFilter(self, obj, event):
+        # List of events that indicate user activity
+        activity_events = [
+            QEvent.Type.KeyPress,
+            QEvent.Type.KeyRelease,
+            QEvent.Type.MouseButtonPress,
+            QEvent.Type.MouseButtonRelease,
+            QEvent.Type.MouseButtonDblClick,
+            QEvent.Type.MouseMove,
+            QEvent.Type.Wheel,
+        ]
+        if event.type() in activity_events:
+            self.user_active.emit()
+        # Pass the event on
+        return super().eventFilter(obj, event)
 
 
 def sniffer_process_target(queue, iface, bpf_filter):
@@ -321,11 +344,6 @@ COMMUNITY_TOOLS = {
         ("reNgine", "https://github.com/yogeshojha/rengine", "An automated reconnaissance framework for web applications."),
         ("Astra", "https://github.com/flipkart-incubator/Astra", "Automated Security Testing For REST APIs.")
     ],
-    "Industrial Control Systems (ICS)": [
-        ("Scapy-cip-enip", "https://github.com/scapy-cip/scapy-cip-enip", "An EtherNet/IP and CIP implementation for Scapy."),
-        ("Scapy-dnp3", "https://github.com/scapy-dnp3/scapy-dnp3", "A DNP3 implementation for Scapy."),
-        ("Scapy-modbus", "https://github.com/scapy-modbus/scapy-modbus", "A Modbus implementation for Scapy.")
-    ]
 }
 
 class CrunchDialog(QDialog):
@@ -1520,6 +1538,9 @@ class Zurvan(QMainWindow):
         self.history_loaded = False
         self.reporting_cve_manager = None
         self.threat_intel_cve_manager = None
+        self.auto_lock_timer = None
+        self.activity_monitor = None
+        self.app_lock_timeout_minutes = 15 # Default
         # self.tool_config_widgets is no longer used.
 
         self.nmap_script_presets = {
@@ -1698,10 +1719,76 @@ class Zurvan(QMainWindow):
 
         # --- Help Menu ---
         help_menu = self.menu_bar.addMenu("&Help")
+        help_menu.addAction("Community Forums & Tools...", self._show_community_dialog)
+        help_menu.addSeparator()
         help_menu.addAction("&About Zurvan", self._show_about_dialog)
         help_menu.addSeparator()
         help_menu.addAction("&AI Settings...", self._show_ai_settings_dialog)
         help_menu.addAction("AI Guide", self._show_ai_guide_dialog)
+
+    def _show_community_dialog(self):
+        """Shows a dialog with links to useful cybersecurity communities and resources."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Community Forums & Resources")
+        dialog.setMinimumSize(600, 500)
+        layout = QVBoxLayout(dialog)
+
+        text_browser = QTextBrowser()
+        text_browser.setOpenExternalLinks(True)
+
+        html_content = """
+        <html><head><style>
+            body { font-family: sans-serif; line-height: 1.5; }
+            h2 { color: #4a90e2; border-bottom: 1px solid #444; padding-bottom: 5px; }
+            ul { list-style-type: none; padding-left: 0; }
+            li { margin-bottom: 10px; }
+            a { color: #8be9fd; text-decoration: none; }
+            a:hover { text-decoration: underline; }
+            b { color: #e0e0e0; }
+        </style></head><body>
+            <h1>Cybersecurity Communities & Resources</h1>
+
+            <h2>News & Analysis</h2>
+            <ul>
+                <li><a href="https://thehackernews.com/"><b>The Hacker News:</b></a> Daily source for cybersecurity news and analysis.</li>
+                <li><a href="https://www.darkreading.com/"><b>Dark Reading:</b></a> News and commentary for security professionals.</li>
+                <li><a href="https://krebsonsecurity.com/"><b>Krebs on Security:</b></a> In-depth security investigations.</li>
+                <li><a href="https://www.wired.com/category/security/"><b>WIRED Security:</b></a> Mainstream tech news with a security focus.</li>
+            </ul>
+
+            <h2>Forums & Discussion</h2>
+            <ul>
+                <li><a href="https://www.reddit.com/r/netsec/"><b>r/netsec (Reddit):</b></a> Large community for technical security discussions.</li>
+                <li><a href="https://www.reddit.com/r/blueteamsec/"><b>r/blueteamsec (Reddit):</b></a> Defensive security and threat intelligence.</li>
+                <li><a href="https://0x00sec.org/"><b>0x00sec:</b></a> Forum for hacking, reverse engineering, and malware analysis.</li>
+                <li><a href="https://stackoverflow.com/questions/tagged/security"><b>Stack Overflow (Security):</b></a> Q&A for security programming questions.</li>
+            </ul>
+
+            <h2>Vulnerability Databases & Exploits</h2>
+            <ul>
+                <li><a href="https://nvd.nist.gov/"><b>NVD:</b></a> National Vulnerability Database.</li>
+                <li><a href="https://www.exploit-db.com/"><b>Exploit-DB:</b></a> Archive of public exploits and shellcode.</li>
+                <li><a href="https://packetstormsecurity.com/"><b>Packet Storm:</b></a> Up-to-date information about new vulnerabilities.</li>
+                <li><a href="https://github.com/trickest/cve"><b>Trickest CVE Repository:</b></a> PoCs for recently published CVEs.</li>
+            </ul>
+
+            <h2>Learning & Resources</h2>
+            <ul>
+                <li><a href="https://tryhackme.com/"><b>TryHackMe:</b></a> Gamified platform for learning cybersecurity.</li>
+                <li><a href="https://www.hackthebox.com/"><b>Hack The Box:</b></a> Online platform to test and advance your pentesting skills.</li>
+                <li><a href="https://book.hacktricks.xyz/"><b>HackTricks:</b></a> A comprehensive repository of pentesting tricks and techniques.</li>
+                <li><a href="https://owasp.org/"><b>OWASP:</b></a> The Open Web Application Security Project.</li>
+            </ul>
+        </body></html>
+        """
+        text_browser.setHtml(html_content)
+        layout.addWidget(text_browser)
+
+        ok_button = QPushButton("Close")
+        ok_button.clicked.connect(dialog.accept)
+        layout.addWidget(ok_button, 0, Qt.AlignmentFlag.AlignRight)
+
+        dialog.exec()
 
     def _show_admin_panel(self):
         """Shows the admin panel dialog."""
@@ -1994,6 +2081,48 @@ class Zurvan(QMainWindow):
 
         header_layout.addStretch()
 
+        # --- App Lock Button ---
+        self.app_lock_button = QToolButton()
+        self.app_lock_button.setText("App Lock")
+        self.app_lock_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'lock.svg')))
+        self.app_lock_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.app_lock_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+
+        lock_menu = QMenu(self)
+        lock_now_action = lock_menu.addAction("Lock Now")
+        lock_now_action.triggered.connect(self._show_lock_screen)
+        lock_menu.addSeparator()
+
+        auto_lock_menu = lock_menu.addMenu("Auto-lock delay")
+        auto_lock_group = QActionGroup(self)
+        auto_lock_group.setExclusive(True)
+
+        timeouts = {"5 Minutes": 5, "15 Minutes": 15, "30 Minutes": 30, "1 Hour": 60, "Disabled": 0}
+        for text, minutes in timeouts.items():
+            action = QAction(text, self, checkable=True)
+            action.setData(minutes)
+            auto_lock_group.addAction(action)
+            auto_lock_menu.addAction(action)
+            if minutes == 15: # Default
+                action.setChecked(True)
+
+        lock_menu.addSeparator()
+        unlock_method_menu = lock_menu.addMenu("Unlock Method")
+        unlock_method_group = QActionGroup(self)
+        unlock_method_group.setExclusive(True)
+
+        pass_action = QAction("Use Password", self, checkable=True)
+        pass_action.setChecked(True)
+        pin_action = QAction("Use PIN", self, checkable=True)
+
+        unlock_method_group.addAction(pass_action)
+        unlock_method_group.addAction(pin_action)
+        unlock_method_menu.addAction(pass_action)
+        unlock_method_menu.addAction(pin_action)
+
+        self.app_lock_button.setMenu(lock_menu)
+        header_layout.addWidget(self.app_lock_button)
+
         # Theme Switcher
         header_layout.addWidget(QLabel("Theme:"))
         self.theme_combo = QComboBox()
@@ -2005,6 +2134,82 @@ class Zurvan(QMainWindow):
 
         # Connect Tor toggle signal
         self.tor_proxy_check.toggled.connect(self._handle_tor_toggle)
+
+        # Connect App Lock signals
+        self.app_lock_timeout_group = self.app_lock_button.menu().findChild(QActionGroup)
+        self.app_lock_timeout_group.triggered.connect(self._handle_auto_lock_change)
+
+        self.app_unlock_method_group = self.app_lock_button.menu().findChildren(QActionGroup)[1]
+        self.app_unlock_method_group.triggered.connect(self._handle_unlock_method_change)
+
+    def _setup_app_lock_monitor(self):
+        """Initializes and starts the activity monitor and auto-lock timer."""
+        # Setup timer
+        self.auto_lock_timer = QTimer(self)
+        self.auto_lock_timer.setSingleShot(True)
+        self.auto_lock_timer.timeout.connect(self._show_lock_screen)
+
+        # Setup event filter
+        self.activity_monitor = ActivityMonitorEventFilter()
+        self.activity_monitor.user_active.connect(self._reset_auto_lock_timer)
+        QApplication.instance().installEventFilter(self.activity_monitor)
+
+        logging.info("App Lock activity monitor installed.")
+        self._reset_auto_lock_timer()
+
+    def _load_and_apply_user_settings(self):
+        """Loads user-specific settings from DB and applies them to the UI."""
+        if not self.current_user:
+            return
+
+        user_data = database.get_user_by_id(self.current_user['id'])
+        if not user_data:
+            return
+
+        # App Lock Timeout
+        self.app_lock_timeout_minutes = user_data.get('app_lock_timeout', 15)
+        for action in self.app_lock_timeout_group.actions():
+            if action.data() == self.app_lock_timeout_minutes:
+                action.setChecked(True)
+                break
+        self._reset_auto_lock_timer() # Start timer with loaded value
+
+        # App Lock Unlock Method
+        unlock_method = user_data.get('app_unlock_method', 'password')
+        for action in self.app_unlock_method_group.actions():
+            if action.text().lower().startswith(unlock_method):
+                action.setChecked(True)
+                break
+
+    def _reset_auto_lock_timer(self):
+        """Stops and restarts the auto-lock timer if a timeout is set."""
+        if self.auto_lock_timer and self.app_lock_timeout_minutes > 0:
+            self.auto_lock_timer.start(self.app_lock_timeout_minutes * 60 * 1000) # Convert minutes to ms
+
+    def _handle_auto_lock_change(self, action):
+        """Handles when the user changes the auto-lock timeout."""
+        self.app_lock_timeout_minutes = action.data()
+        if self.app_lock_timeout_minutes == 0:
+            self.auto_lock_timer.stop()
+            logging.info("Auto-lock timer disabled.")
+        else:
+            self._reset_auto_lock_timer()
+            logging.info(f"Auto-lock timeout set to {self.app_lock_timeout_minutes} minutes.")
+
+        # Save to DB
+        if self.current_user:
+            current_method_action = self.app_unlock_method_group.checkedAction()
+            current_method = "pin" if current_method_action and "pin" in current_method_action.text().lower() else "password"
+            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, current_method)
+
+    def _handle_unlock_method_change(self, action):
+        """Handles when the user changes the unlock method."""
+        method = "pin" if "pin" in action.text().lower() else "password"
+        logging.info(f"App unlock method changed to: {method}")
+        # Save to DB
+        if self.current_user:
+            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
+
 
     def _handle_theme_change(self, theme_name):
         theme_file = f"{theme_name}.xml"
@@ -2088,7 +2293,6 @@ class Zurvan(QMainWindow):
         self.tab_widget.addTab(self._create_threat_intelligence_tab(), QIcon("icons/database.svg"), "Threat Intelligence")
         self.tab_widget.addTab(self._create_history_tab(), QIcon("icons/file-text.svg"), "History")
 
-        self.tab_widget.addTab(self._create_community_tools_tab(), QIcon("icons/users.svg"), "Community Tools")
         self.tab_widget.addTab(self._create_system_info_tab(), QIcon("icons/info.svg"), "System Info")
 
     def _create_threat_intelligence_tab(self):
@@ -2112,10 +2316,20 @@ class Zurvan(QMainWindow):
         layout = QVBoxLayout(widget)
 
         controls_layout = QHBoxLayout()
+        self.history_search_input = QLineEdit()
+        self.history_search_input.setPlaceholderText("Search history...")
+        self.history_search_input.returnPressed.connect(self._populate_history_tab)
+        controls_layout.addWidget(QLabel("Search:"))
+        controls_layout.addWidget(self.history_search_input)
+
         self.refresh_history_btn = QPushButton(QIcon("icons/refresh-cw.svg"), " Refresh History")
         self.refresh_history_btn.clicked.connect(self._populate_history_tab)
         controls_layout.addWidget(self.refresh_history_btn)
         controls_layout.addStretch()
+
+        export_btn = self._create_export_button(self.history_tree)
+        controls_layout.addWidget(export_btn)
+
         layout.addLayout(controls_layout)
 
         self.history_tree = QTreeWidget()
@@ -2135,9 +2349,10 @@ class Zurvan(QMainWindow):
         if not self.current_user:
             return
         self.history_tree.clear()
+        search_term = self.history_search_input.text().strip()
         try:
             # The user_id is passed to get history for the current user only
-            history_records = database.get_test_history(self.current_user['id'])
+            history_records = database.get_test_history(self.current_user['id'], search_term=search_term)
             if not history_records:
                 # Use a placeholder item to show a message in the tree itself
                 placeholder_item = QTreeWidgetItem(["No history found for your user."])
@@ -2502,28 +2717,6 @@ class Zurvan(QMainWindow):
             webbrowser.open(url)
         else:
             QMessageBox.warning(self, "Invalid URL", f"The selected item does not have a valid URL: {url}")
-
-    def _create_community_tools_tab(self):
-        """Creates the UI for the Scapy Community Tools tab."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-
-        text_browser = QTextBrowser()
-        text_browser.setOpenExternalLinks(True)
-
-        html_content = "<h1>Scapy Community Tools and Projects</h1>"
-        html_content += "<p>This is a curated list of awesome tools, talks, and projects related to Scapy, inspired by the <a href='https://github.com/gpotter2/awesome-scapy'>awesome-scapy</a> repository.</p>"
-
-        for category, tools in COMMUNITY_TOOLS.items():
-            html_content += f"<h2>{category}</h2>"
-            html_content += "<ul>"
-            for name, url, description in tools:
-                html_content += f"<li><b><a href='{url}'>{name}</a></b>: {description}</li>"
-            html_content += "</ul>"
-
-        text_browser.setHtml(html_content)
-        layout.addWidget(text_browser)
-        return widget
 
     def _create_log_panel(self):
         """Creates the dockable logging panel at the bottom of the window."""
@@ -7106,34 +7299,47 @@ class Zurvan(QMainWindow):
         scroll_area.setWidget(main_widget)
 
         # --- Helper for creating styled GroupBoxes ---
-        def create_info_box(title):
-            box = QGroupBox(title)
-            # Basic styling for a modern "card" look
+        def create_info_box(title, icon_name=None):
+            box = QGroupBox()
             box.setStyleSheet("""
                 QGroupBox {
-                    font-size: 14px;
-                    font-weight: bold;
                     border: 1px solid #444;
                     border-radius: 8px;
                     margin-top: 10px;
                 }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    subcontrol-position: top left;
-                    padding: 0 10px;
-                }
             """)
-            layout = QFormLayout(box)
-            layout.setSpacing(10)
-            layout.setContentsMargins(15, 25, 15, 15) # Top margin for title
-            return box, layout
+
+            box_layout = QVBoxLayout(box)
+            box_layout.setSpacing(10)
+
+            # Custom Title Layout
+            title_layout = QHBoxLayout()
+            if icon_name:
+                icon_label = QLabel()
+                icon_path = os.path.join(os.path.dirname(__file__), "icons", icon_name)
+                icon_label.setPixmap(QIcon(icon_path).pixmap(22, 22))
+                title_layout.addWidget(icon_label)
+
+            title_label = QLabel(title)
+            title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+            title_layout.addWidget(title_label)
+            title_layout.addStretch()
+            box_layout.addLayout(title_layout)
+
+            # Content Layout
+            content_layout = QFormLayout()
+            content_layout.setSpacing(10)
+            content_layout.setContentsMargins(15, 10, 15, 15)
+            box_layout.addLayout(content_layout)
+
+            return box, content_layout
 
         # --- Top Row: System, CPU, Memory ---
         top_row_layout = QHBoxLayout()
         top_row_layout.setSpacing(20)
 
         # System Info Box
-        sys_box, sys_layout = create_info_box("System")
+        sys_box, sys_layout = create_info_box("System", "info.svg")
         sys_layout.addRow("OS:", QLabel(f"{platform.system()} {platform.release()}"))
         sys_layout.addRow("Architecture:", QLabel(platform.machine()))
         sys_layout.addRow("Hostname:", QLabel(platform.node()))
@@ -7141,7 +7347,7 @@ class Zurvan(QMainWindow):
         top_row_layout.addWidget(sys_box)
 
         # CPU Info Box
-        cpu_box, cpu_layout = create_info_box("CPU")
+        cpu_box, cpu_layout = create_info_box("CPU", "layers.svg")
         try:
             cpu_freq = psutil.cpu_freq()
             freq_str = f"{cpu_freq.current:.2f} Mhz (Max: {cpu_freq.max:.2f} Mhz)" if cpu_freq else "N/A"
@@ -7153,7 +7359,7 @@ class Zurvan(QMainWindow):
         top_row_layout.addWidget(cpu_box)
 
         # Memory Info Box
-        mem_box, mem_layout = create_info_box("Memory")
+        mem_box, mem_layout = create_info_box("Memory", "database.svg")
         mem = psutil.virtual_memory()
         swap = psutil.swap_memory()
         mem_layout.addRow("Total RAM:", QLabel(f"{mem.total / (1024**3):.2f} GB"))
@@ -7173,7 +7379,7 @@ class Zurvan(QMainWindow):
             scapy_version = scapy.VERSION
         except AttributeError:
             scapy_version = "Unknown"
-        lib_box, lib_layout = create_info_box("Library Versions")
+        lib_box, lib_layout = create_info_box("Library Versions", "file-text.svg")
         lib_layout.addRow("Scapy:", QLabel(scapy_version))
         lib_layout.addRow("PyQt6:", QLabel(PYQT_VERSION_STR))
         lib_layout.addRow("psutil:", QLabel(psutil.__version__))
@@ -7183,7 +7389,7 @@ class Zurvan(QMainWindow):
 
         # GPU Info Box
         if GPUtil:
-            gpu_box, gpu_layout = create_info_box("GPU Information")
+            gpu_box, gpu_layout = create_info_box("GPU Information", "tool.svg")
             try:
                 gpus = GPUtil.getGPUs()
                 if not gpus:
@@ -7201,27 +7407,13 @@ class Zurvan(QMainWindow):
         main_layout.addLayout(second_row_layout)
 
         # --- Disk Partitions Box ---
-        disk_box = QGroupBox("Disk Partitions")
-        disk_box.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                border: 1px solid #444;
-                border-radius: 8px;
-                margin-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top left;
-                padding: 0 10px;
-            }
-        """)
-        disk_layout = QGridLayout(disk_box)
-        disk_layout.setContentsMargins(15, 25, 15, 15)
+        disk_box, disk_layout = create_info_box("Disk Partitions", "folder.svg")
+        disk_content_widget = QWidget() # Use a simple widget for the grid
+        disk_grid_layout = QGridLayout(disk_content_widget)
         try:
             partitions = psutil.disk_partitions()
             if not partitions:
-                disk_layout.addWidget(QLabel("No disk partitions found."), 0, 0)
+                disk_grid_layout.addWidget(QLabel("No disk partitions found."), 0, 0)
             else:
                 row, col = 0, 0
                 for part in partitions:
@@ -7230,7 +7422,7 @@ class Zurvan(QMainWindow):
                         part_label = QLabel(f"<b>{part.device}</b> on {part.mountpoint} ({part.fstype})<br>"
                                           f"&nbsp;&nbsp;Total: {usage.total / (1024**3):.2f} GB, "
                                           f"Used: {usage.used / (1024**3):.2f} GB ({usage.percent}%)")
-                        disk_layout.addWidget(part_label, row, col)
+                        disk_grid_layout.addWidget(part_label, row, col)
                         col += 1
                         if col >= 2: # 2 columns
                             col = 0
@@ -7238,24 +7430,15 @@ class Zurvan(QMainWindow):
                     except Exception:
                         continue # Skip inaccessible drives
         except Exception as e:
-            disk_layout.addWidget(QLabel(f"Could not retrieve disk partitions: {e}"), 0, 0)
+            disk_grid_layout.addWidget(QLabel(f"Could not retrieve disk partitions: {e}"), 0, 0)
+        disk_layout.addRow(disk_content_widget)
         main_layout.addWidget(disk_box)
 
 
         # --- Network Interfaces Box ---
-        net_box = QGroupBox("Network Interfaces")
-        net_box.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px; font-weight: bold; border: 1px solid #444;
-                border-radius: 8px; margin-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin; subcontrol-position: top left; padding: 0 10px;
-            }
-        """)
-        net_main_layout = QVBoxLayout(net_box)
-        net_main_layout.setContentsMargins(15, 25, 15, 15)
-
+        net_box, net_layout = create_info_box("Network Interfaces", "wifi.svg")
+        net_content_widget = QWidget()
+        net_main_layout = QVBoxLayout(net_content_widget)
         try:
             ifaddrs = psutil.net_if_addrs()
             if not ifaddrs:
@@ -7298,6 +7481,7 @@ class Zurvan(QMainWindow):
             logging.error(f"Could not retrieve network interfaces: {e}", exc_info=True)
             net_main_layout.addWidget(QLabel(f"Could not retrieve interfaces: {e}"))
 
+        net_layout.addRow(net_content_widget)
         main_layout.addWidget(net_box)
 
         main_layout.addStretch() # Push everything to the top
@@ -11350,6 +11534,8 @@ def main():
             window.setWindowTitle(f"Welcome, {window.current_user['username']} - Zurvan - Comprehensive AI-Powered Security Platform")
         window._update_menu_bar() # Populate the menu now that we have a user
         window._set_user_avatar() # Set avatar after user is loaded
+        window._load_and_apply_user_settings() # Load user-specific settings
+        window._setup_app_lock_monitor() # Start the activity monitor
         window.show()
         sys.exit(app.exec())
 
@@ -11362,6 +11548,41 @@ def main():
         app = QApplication(sys.argv)
         QMessageBox.critical(None, "Unhandled Exception", f"An unexpected error occurred:\n\n{e}")
         sys.exit(1)
+
+    def _show_lock_screen(self):
+        """Displays the application lock screen."""
+        if not self.current_user:
+            return # Should not happen if the UI is enabled, but good practice
+
+        # Re-fetch user data to get the latest settings
+        user_data = database.get_user_by_id(self.current_user['id'])
+        if not user_data:
+            QMessageBox.critical(self, "Error", "Could not retrieve current user data.")
+            return
+
+        unlock_method = user_data.get('app_unlock_method', 'password')
+        password_hash = user_data.get('password_hash')
+        pin_hash = user_data.get('pin_hash')
+
+        if unlock_method == 'pin' and not pin_hash:
+            QMessageBox.warning(self, "PIN Not Set", "Unlock method is set to PIN, but no PIN has been configured. Please set a PIN in your profile or change the unlock method.")
+            # In a real scenario, you might default to password here, but for now, this is safer.
+            return
+
+        def verification_callback(entered_value):
+            """Nested function to verify the entered password or PIN."""
+            if unlock_method == 'password':
+                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == password_hash
+            elif unlock_method == 'pin':
+                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == pin_hash
+            return False
+
+        lock_dialog = AppLockDialog(
+            unlock_method=unlock_method,
+            verification_callback=verification_callback,
+            parent=self
+        )
+        lock_dialog.exec()
 
 if __name__ == "__main__":
     main()

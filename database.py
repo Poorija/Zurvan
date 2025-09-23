@@ -55,6 +55,11 @@ def create_tables():
     # Add avatar column
     _add_column_if_not_exists(cursor, "users", "avatar", "BLOB")
 
+    # Add App Lock columns
+    _add_column_if_not_exists(cursor, "users", "app_lock_timeout", "INTEGER DEFAULT 15")
+    _add_column_if_not_exists(cursor, "users", "app_unlock_method", "TEXT DEFAULT 'password'")
+    _add_column_if_not_exists(cursor, "users", "pin_hash", "TEXT")
+
     # Security questions table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS security_questions (
@@ -159,7 +164,7 @@ def create_admin_user():
     conn.close()
     logging.info("Default admin user created successfully.")
 
-def verify_user(username, password):
+def verify_user(username, password, is_status_check=False):
     """
     Verifies user credentials and checks for lockouts.
     Returns the user row on success.
@@ -173,7 +178,8 @@ def verify_user(username, password):
     user = cursor.fetchone()
 
     if not user:
-        log_login_event(username, 'Failed Login (User not found)')
+        if not is_status_check:
+            log_login_event(username, 'Failed Login (User not found)')
         conn.close()
         return None
 
@@ -191,24 +197,25 @@ def verify_user(username, password):
     hashed_password = hash_password(password)
     if user['password_hash'] == hashed_password and user['is_active'] == 1:
         clear_login_attempts(user['id']) # Success, clear attempts
-        log_login_event(username, 'Successful Login', user['id'])
+        log_login_event(username, 'Successful Login', user['id'], cursor=cursor)
+        conn.commit()
         conn.close()
         return user
     else:
-        # Do not register a failed attempt for an already inactive user
-        if user['is_active'] == 1:
-            log_login_event(username, 'Failed Login (Incorrect Password)', user['id'])
-            register_failed_login_attempt(username) # Failure, record attempt
+        # Do not register a failed attempt for a status check or an already inactive user
+        if not is_status_check and user['is_active'] == 1:
+            log_login_event(username, 'Failed Login (Incorrect Password)', user['id'], cursor=cursor)
+            register_failed_login_attempt(username, cursor=cursor) # Failure, record attempt
+        elif is_status_check:
+            pass # Do nothing on a status check
         else:
-            log_login_event(username, 'Failed Login (Account Inactive)', user['id'])
+            log_login_event(username, 'Failed Login (Account Inactive)', user['id'], cursor=cursor)
+        conn.commit()
         conn.close()
         return None
 
-def register_failed_login_attempt(username):
-    """Implements the progressive lockout logic."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
+def register_failed_login_attempt(username, cursor):
+    """Implements the progressive lockout logic. Requires an existing cursor."""
     cursor.execute("SELECT id, failed_login_attempts, lockout_level FROM users WHERE username = ? AND is_active = 1", (username,))
     user = cursor.fetchone()
 
@@ -219,27 +226,28 @@ def register_failed_login_attempt(username):
 
         if new_attempts >= 3:
             new_level = current_level + 1
-            if new_level >= 6:
-                # Deactivate account after 5 lockouts (3, 6, 9, 12, 15 mins)
+            lockout_minutes = 0
+
+            if new_level == 1: lockout_minutes = 3
+            elif new_level == 2: lockout_minutes = 6
+            elif new_level == 3: lockout_minutes = 9
+            elif new_level == 4: lockout_minutes = 15
+            else: # new_level >= 5, deactivate account
                 cursor.execute("UPDATE users SET is_active = 0, failed_login_attempts = 0, lockout_level = ? WHERE id = ?", (new_level, user_id))
                 logging.warning(f"User '{username}' (ID: {user_id}) has been deactivated due to excessive failed login attempts.")
-                log_login_event(username, "Account Deactivated", user_id)
-            else:
-                # Set progressive lockout time and reset attempt counter for the next cycle
-                lockout_minutes = new_level * 3
-                lockout_time = datetime.now() + timedelta(minutes=lockout_minutes)
-                cursor.execute(
-                    "UPDATE users SET failed_login_attempts = 0, lockout_level = ?, lockout_until = ? WHERE id = ?",
-                    (new_level, lockout_time, user_id)
-                )
-                logging.warning(f"User '{username}' (ID: {user_id}) locked out for {lockout_minutes} minutes (Level {new_level}).")
-                log_login_event(username, f"Account Locked ({lockout_minutes} mins)", user_id)
+                log_login_event(username, "Account Deactivated", user_id, cursor=cursor)
+                return # Exit early, no lockout time to set
+
+            lockout_time = datetime.now() + timedelta(minutes=lockout_minutes)
+            cursor.execute(
+                "UPDATE users SET failed_login_attempts = 0, lockout_level = ?, lockout_until = ? WHERE id = ?",
+                (new_level, lockout_time.isoformat(), user_id)
+            )
+            logging.warning(f"User '{username}' (ID: {user_id}) locked out for {lockout_minutes} minutes (Level {new_level}).")
+            log_login_event(username, f"Account Locked ({lockout_minutes} mins)", user_id, cursor=cursor)
         else:
             # Just increment the attempt counter if it's below the threshold
             cursor.execute("UPDATE users SET failed_login_attempts = ? WHERE id = ?", (new_attempts, user_id))
-
-    conn.commit()
-    conn.close()
 
 def clear_login_attempts(user_id):
     """Resets failed login attempts and lockout level for a user upon successful login."""
@@ -380,6 +388,35 @@ def update_user_password(user_id, new_password):
     conn.commit()
     conn.close()
 
+def update_user_pin(user_id, new_pin):
+    """Updates the App Lock PIN for a given user."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    pin_hash = hash_password(new_pin) if new_pin else None
+    cursor.execute("UPDATE users SET pin_hash = ? WHERE id = ?", (pin_hash, user_id))
+    conn.commit()
+    conn.close()
+
+def update_user_app_lock_settings(user_id, timeout_minutes, unlock_method):
+    """Updates the app lock settings for a given user."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE users
+        SET app_lock_timeout = ?, app_unlock_method = ?
+        WHERE id = ?
+    """, (timeout_minutes, unlock_method, user_id))
+    conn.commit()
+    conn.close()
+
+def clear_user_pin(user_id):
+    """Clears the App Lock PIN for a given user, forcing them to set a new one."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET pin_hash = NULL WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
 def get_user_by_username_or_email(identifier):
     """Fetches a user by their username or email."""
     conn = get_db_connection()
@@ -423,16 +460,24 @@ def verify_security_answers(user_id, answers_dict):
     conn.close()
     return True # All answers were correct
 
-def log_login_event(username, event_type, user_id=None):
-    """Logs a login-related event to the history table."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def log_login_event(username, event_type, user_id=None, cursor=None):
+    """Logs a login-related event to the history table. Can use an existing cursor to prevent db locks."""
+    conn = None
+    # If no cursor is provided, this function is being called independently.
+    # Create a new connection and manage it.
+    if cursor is None:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
     cursor.execute("""
         INSERT INTO login_history (user_id, username, event_type)
         VALUES (?, ?, ?)
     """, (user_id, username, event_type))
-    conn.commit()
-    conn.close()
+
+    # Only commit and close if this function owns the connection.
+    if conn:
+        conn.commit()
+        conn.close()
 
 def get_login_history(username_filter=None):
     """Retrieves login history, optionally filtered by username."""
@@ -477,25 +522,39 @@ def log_test_to_history(user_id, test_type, target, results):
     conn.commit()
     conn.close()
 
-def get_test_history(user_id=None):
+def get_test_history(user_id=None, search_term=""):
     """
-    Retrieves test history.
-    If user_id is provided, fetches for a specific user.
-    Otherwise, fetches all history for all users (admin view).
+    Retrieves test history with optional filtering by user and search term.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    params = []
+
+    # Base query for admin view (joins with users)
+    query = """
+        SELECT h.id, h.timestamp, u.username, h.test_type, h.target, h.results
+        FROM test_history h
+        JOIN users u ON h.user_id = u.id
+    """
+
+    where_clauses = []
+
     if user_id:
-        # For a specific user, we don't need to join with the users table
-        cursor.execute("SELECT id, timestamp, 'N/A' as username, test_type, target, results FROM test_history WHERE user_id = ? ORDER BY timestamp DESC", (user_id,))
-    else:
-        # For the admin view, we want to join to get the username
-        cursor.execute("""
-            SELECT h.id, h.timestamp, u.username, h.test_type, h.target, h.results
-            FROM test_history h
-            JOIN users u ON h.user_id = u.id
-            ORDER BY h.timestamp DESC
-        """)
+        where_clauses.append("h.user_id = ?")
+        params.append(user_id)
+
+    if search_term:
+        # Search across multiple relevant fields
+        where_clauses.append("(h.test_type LIKE ? OR h.target LIKE ? OR h.results LIKE ?)")
+        params.extend([f'%{search_term}%'] * 3)
+
+    if where_clauses:
+        query += " WHERE " + " AND ".join(where_clauses)
+
+    query += " ORDER BY h.timestamp DESC"
+
+    cursor.execute(query, tuple(params))
     history = cursor.fetchall()
     conn.close()
     return history
