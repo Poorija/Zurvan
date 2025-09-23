@@ -2242,6 +2242,7 @@ class Zurvan(QMainWindow):
         unlock_method_menu.addAction(pin_action)
 
         self.app_lock_button.setMenu(lock_menu)
+        self.app_lock_button.setDefaultAction(lock_now_action)
         header_layout.addWidget(self.app_lock_button)
 
         # Theme Switcher
@@ -2327,40 +2328,6 @@ class Zurvan(QMainWindow):
         # Save to DB
         if self.current_user:
             database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
-
-    def _show_lock_screen(self):
-        """Displays the application lock screen."""
-        if not self.current_user:
-            return # Should not happen if the UI is enabled, but good practice
-
-        # Re-fetch user data to get the latest settings
-        user_data = database.get_user_by_id(self.current_user['id'])
-        if not user_data:
-            QMessageBox.critical(self, "Error", "Could not retrieve current user data.")
-            return
-
-        unlock_method = user_data.get('app_unlock_method', 'password')
-        password_hash = user_data.get('password_hash')
-        pin_hash = user_data.get('pin_hash')
-
-        if unlock_method == 'pin' and not pin_hash:
-            QMessageBox.warning(self, "PIN Not Set", "Unlock method is set to PIN, but no PIN has been configured. Please set a PIN in your profile or change the unlock method.")
-            return
-
-        def verification_callback(entered_value):
-            """Nested function to verify the entered password or PIN."""
-            if unlock_method == 'password':
-                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == password_hash
-            elif unlock_method == 'pin':
-                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == pin_hash
-            return False
-
-        lock_dialog = AppLockDialog(
-            username=user_data.get('username'),
-            unlock_method=unlock_method,
-            verification_callback=verification_callback,
-            parent=self
-        )
 
     def _handle_theme_change(self, theme_name):
         theme_file = f"{theme_name}.xml"
