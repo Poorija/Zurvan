@@ -100,6 +100,34 @@ def create_tables():
     );
     """)
 
+    # Login history table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS login_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        username TEXT NOT NULL,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        event_type TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    );
+    """)
+
+    # AI Chat History table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS ai_chat_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        session_id TEXT NOT NULL,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    );
+    """)
+    # Index for faster history retrieval
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_chat_history_session ON ai_chat_history(user_id, session_id)")
+
+
     conn.commit()
     conn.close()
     logging.info("Database tables created or already exist.")
@@ -145,6 +173,7 @@ def verify_user(username, password):
     user = cursor.fetchone()
 
     if not user:
+        log_login_event(username, 'Failed Login (User not found)')
         conn.close()
         return None
 
@@ -162,12 +191,16 @@ def verify_user(username, password):
     hashed_password = hash_password(password)
     if user['password_hash'] == hashed_password and user['is_active'] == 1:
         clear_login_attempts(user['id']) # Success, clear attempts
+        log_login_event(username, 'Successful Login', user['id'])
         conn.close()
         return user
     else:
         # Do not register a failed attempt for an already inactive user
         if user['is_active'] == 1:
+            log_login_event(username, 'Failed Login (Incorrect Password)', user['id'])
             register_failed_login_attempt(username) # Failure, record attempt
+        else:
+            log_login_event(username, 'Failed Login (Account Inactive)', user['id'])
         conn.close()
         return None
 
@@ -190,6 +223,7 @@ def register_failed_login_attempt(username):
                 # Deactivate account after 5 lockouts (3, 6, 9, 12, 15 mins)
                 cursor.execute("UPDATE users SET is_active = 0, failed_login_attempts = 0, lockout_level = ? WHERE id = ?", (new_level, user_id))
                 logging.warning(f"User '{username}' (ID: {user_id}) has been deactivated due to excessive failed login attempts.")
+                log_login_event(username, "Account Deactivated", user_id)
             else:
                 # Set progressive lockout time and reset attempt counter for the next cycle
                 lockout_minutes = new_level * 3
@@ -199,6 +233,7 @@ def register_failed_login_attempt(username):
                     (new_level, lockout_time, user_id)
                 )
                 logging.warning(f"User '{username}' (ID: {user_id}) locked out for {lockout_minutes} minutes (Level {new_level}).")
+                log_login_event(username, f"Account Locked ({lockout_minutes} mins)", user_id)
         else:
             # Just increment the attempt counter if it's below the threshold
             cursor.execute("UPDATE users SET failed_login_attempts = ? WHERE id = ?", (new_attempts, user_id))
@@ -328,6 +363,14 @@ def set_user_active_status(user_id, is_active):
     conn.commit()
     conn.close()
 
+def set_user_admin_status(user_id, is_admin):
+    """Updates the is_admin status for a given user."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET is_admin = ? WHERE id = ?", (int(is_admin), user_id))
+    conn.commit()
+    conn.close()
+
 def update_user_password(user_id, new_password):
     """Updates the password for a given user."""
     conn = get_db_connection()
@@ -379,6 +422,49 @@ def verify_security_answers(user_id, answers_dict):
 
     conn.close()
     return True # All answers were correct
+
+def log_login_event(username, event_type, user_id=None):
+    """Logs a login-related event to the history table."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO login_history (user_id, username, event_type)
+        VALUES (?, ?, ?)
+    """, (user_id, username, event_type))
+    conn.commit()
+    conn.close()
+
+def get_login_history(username_filter=None):
+    """Retrieves login history, optionally filtered by username."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    query = "SELECT strftime('%Y-%m-%d %H:%M:%S', timestamp) as ts, username, event_type FROM login_history"
+    params = []
+
+    if username_filter:
+        query += " WHERE username = ?"
+        params.append(username_filter)
+
+    query += " ORDER BY timestamp DESC"
+
+    cursor.execute(query, params)
+    history = cursor.fetchall()
+    conn.close()
+    return history
+
+def get_latest_session_id(user_id):
+    """Retrieves the most recent session_id for a given user."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT session_id FROM ai_chat_history
+        WHERE user_id = ?
+        ORDER BY timestamp DESC
+        LIMIT 1
+    """, (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
 
 def log_test_to_history(user_id, test_type, target, results):
     """Logs a completed test or action to the history table."""
@@ -510,6 +596,32 @@ def get_cve_total_count(filter_text, cvss_min=None, cvss_max=None, date_from=Non
     count = cursor.fetchone()[0]
     conn.close()
     return count
+
+def add_chat_message(user_id, session_id, role, content):
+    """Adds a new chat message to the AI history table."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO ai_chat_history (user_id, session_id, role, content)
+        VALUES (?, ?, ?, ?)
+    """, (user_id, session_id, role, content))
+    conn.commit()
+    conn.close()
+
+def get_chat_history(user_id, session_id):
+    """Retrieves all chat messages for a given user and session."""
+    if not session_id:
+        return []
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT role, content FROM ai_chat_history
+        WHERE user_id = ? AND session_id = ?
+        ORDER BY timestamp ASC
+    """, (user_id, session_id))
+    history = cursor.fetchall()
+    conn.close()
+    return history
 
 def initialize_database():
     """

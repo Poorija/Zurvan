@@ -19,16 +19,20 @@ class AdminPanelDialog(QDialog):
 
         # Create Tabs
         self.user_management_tab = QWidget()
-        self.history_tab = QWidget()
+        self.test_history_tab = QWidget()
         self.tabs.addTab(self.user_management_tab, "User Management")
-        self.tabs.addTab(self.history_tab, "Test History")
+        self.login_history_tab = QWidget()
+        self.tabs.addTab(self.login_history_tab, "Login History")
+        self.tabs.addTab(self.test_history_tab, "Tool Usage History")
 
         # Populate Tabs
         self._create_user_management_widgets()
-        self._create_history_widgets()
+        self._create_login_history_widgets()
+        self._create_test_history_widgets()
 
         self._populate_users()
-        self._populate_admin_history_tab()
+        self._populate_login_history_tab()
+        self._populate_test_history_tab()
 
     def _create_user_management_widgets(self):
         """Creates the widgets for the user management tab."""
@@ -51,8 +55,10 @@ class AdminPanelDialog(QDialog):
         actions_box = QGroupBox("User Actions")
         actions_layout = QVBoxLayout(actions_box)
         self.toggle_active_btn = QPushButton("Enable/Disable User")
+        self.toggle_admin_btn = QPushButton("Grant/Revoke Admin")
         self.reset_password_btn = QPushButton("Reset User Password")
         actions_layout.addWidget(self.toggle_active_btn)
+        actions_layout.addWidget(self.toggle_admin_btn)
         actions_layout.addWidget(self.reset_password_btn)
         actions_layout.addStretch()
         bottom_layout.addWidget(actions_box)
@@ -88,6 +94,7 @@ class AdminPanelDialog(QDialog):
 
         # --- Connect signals ---
         self.toggle_active_btn.clicked.connect(self._toggle_user_active_status)
+        self.toggle_admin_btn.clicked.connect(self._toggle_admin_status)
         self.reset_password_btn.clicked.connect(self._reset_user_password)
         self.save_profile_btn.clicked.connect(self._save_profile)
         self.refresh_btn.clicked.connect(self._populate_users)
@@ -95,19 +102,46 @@ class AdminPanelDialog(QDialog):
         # Initially disable editing widgets
         self._set_editing_widgets_enabled(False)
 
-    def _create_history_widgets(self):
+    def _create_login_history_widgets(self):
+        """Creates the widgets for the login history tab."""
+        tab_layout = QVBoxLayout(self.login_history_tab)
+
+        # --- Controls ---
+        controls_layout = QHBoxLayout()
+        controls_layout.addWidget(QLabel("Filter by User:"))
+        self.login_history_user_filter_combo = QComboBox()
+        self.login_history_user_filter_combo.currentTextChanged.connect(self._populate_login_history_tab)
+        controls_layout.addWidget(self.login_history_user_filter_combo)
+
+        self.login_history_refresh_btn = QPushButton("Refresh")
+        self.login_history_refresh_btn.clicked.connect(self._populate_login_history_tab)
+        controls_layout.addWidget(self.login_history_refresh_btn)
+        controls_layout.addStretch()
+        tab_layout.addLayout(controls_layout)
+
+        # --- History Tree ---
+        self.login_history_tree = QTreeWidget()
+        self.login_history_tree.setColumnCount(3)
+        self.login_history_tree.setHeaderLabels(["Timestamp", "Username", "Event"])
+        self.login_history_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.login_history_tree.header().setStretchLastSection(True)
+        self.login_history_tree.header().resizeSection(0, 180)
+        self.login_history_tree.header().resizeSection(1, 150)
+        tab_layout.addWidget(self.login_history_tree)
+
+    def _create_test_history_widgets(self):
         """Creates the widgets for the test history tab."""
-        tab_layout = QVBoxLayout(self.history_tab)
+        tab_layout = QVBoxLayout(self.test_history_tab)
 
         # --- Controls ---
         controls_layout = QHBoxLayout()
         controls_layout.addWidget(QLabel("Filter by User:"))
         self.history_user_filter_combo = QComboBox()
-        self.history_user_filter_combo.currentTextChanged.connect(self._populate_admin_history_tab)
+        self.history_user_filter_combo.currentTextChanged.connect(self._populate_test_history_tab)
         controls_layout.addWidget(self.history_user_filter_combo)
 
         self.history_refresh_btn = QPushButton("Refresh")
-        self.history_refresh_btn.clicked.connect(self._populate_admin_history_tab)
+        self.history_refresh_btn.clicked.connect(self._populate_test_history_tab)
         controls_layout.addWidget(self.history_refresh_btn)
         controls_layout.addStretch()
         self.history_delete_btn = QPushButton("Delete Selected Entry")
@@ -126,7 +160,41 @@ class AdminPanelDialog(QDialog):
         tab_layout.addWidget(self.admin_history_tree)
 
 
-    def _populate_admin_history_tab(self):
+    def _populate_login_history_tab(self):
+        """Fetches and displays login history, optionally filtered by user."""
+        if not hasattr(self, 'login_history_tree'):
+            return
+
+        self.login_history_tree.clear()
+
+        current_selection = self.login_history_user_filter_combo.currentText()
+        self.login_history_user_filter_combo.blockSignals(True)
+        self.login_history_user_filter_combo.clear()
+        self.login_history_user_filter_combo.addItem("All Users")
+        users = database.get_all_users()
+        for user in users:
+            self.login_history_user_filter_combo.addItem(user['username'])
+        self.login_history_user_filter_combo.setCurrentText(current_selection)
+        self.login_history_user_filter_combo.blockSignals(False)
+
+        username_filter = self.login_history_user_filter_combo.currentText()
+        if username_filter == "All Users":
+            username_filter = None
+
+        try:
+            history_records = database.get_login_history(username_filter=username_filter)
+            for record in history_records:
+                item = QTreeWidgetItem([
+                    record['ts'],
+                    record['username'],
+                    record['event_type']
+                ])
+                self.login_history_tree.addTopLevelItem(item)
+        except Exception as e:
+            QMessageBox.critical(self, "History Error", f"Could not load login history: {e}")
+
+
+    def _populate_test_history_tab(self):
         """Fetches and displays test history, optionally filtered by user."""
         # This can be called before the widget is created when the dialog opens
         if not hasattr(self, 'admin_history_tree'):
@@ -180,7 +248,7 @@ class AdminPanelDialog(QDialog):
             try:
                 database.delete_history_entry(history_id)
                 QMessageBox.information(self, "Success", "History entry deleted.")
-                self._populate_admin_history_tab() # Refresh the view
+                self._populate_test_history_tab() # Refresh the view
             except Exception as e:
                 QMessageBox.critical(self, "Database Error", f"Failed to delete history entry: {e}")
 
@@ -197,6 +265,7 @@ class AdminPanelDialog(QDialog):
     def _set_editing_widgets_enabled(self, enabled):
         """Enables or disables all the user editing widgets."""
         self.toggle_active_btn.setEnabled(enabled)
+        self.toggle_admin_btn.setEnabled(enabled)
         self.reset_password_btn.setEnabled(enabled)
         self.username_edit.setEnabled(enabled)
         self.email_edit.setEnabled(enabled)
@@ -265,6 +334,7 @@ class AdminPanelDialog(QDialog):
         # The default admin user cannot be disabled or have its username changed
         is_admin_user = (username == 'admin')
         self.toggle_active_btn.setEnabled(not is_admin_user)
+        self.toggle_admin_btn.setEnabled(not is_admin_user)
         self.username_edit.setEnabled(not is_admin_user)
 
         self.full_name_edit.setText(profile_data.get("full_name") or "")
@@ -309,6 +379,36 @@ class AdminPanelDialog(QDialog):
              QMessageBox.critical(self, "Database Error", f"Failed to update profile: Username or email already exists.\n{e}")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to update profile: {e}")
+
+    def _toggle_admin_status(self):
+        """Grants or revokes admin privileges for the selected user."""
+        selected_items = self.user_tree.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "No Selection", "Please select a user from the list.")
+            return
+
+        selected_item = selected_items[0]
+        user_id = int(selected_item.text(0))
+        username = selected_item.text(1)
+        is_currently_admin = selected_item.text(3) == "Yes"
+
+        if username == 'admin':
+            QMessageBox.warning(self, "Action Denied", "The default admin account's status cannot be changed.")
+            return
+
+        new_status = not is_currently_admin
+        action_text = "revoke admin privileges from" if is_currently_admin else "grant admin privileges to"
+
+        reply = QMessageBox.question(self, "Confirm Action", f"Are you sure you want to {action_text} the user '{username}'?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                database.set_user_admin_status(user_id, new_status)
+                QMessageBox.information(self, "Success", f"Admin status for '{username}' has been updated.")
+                self._populate_users() # Refresh list
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to update admin status: {e}")
 
     def _toggle_user_active_status(self):
         selected_items = self.user_tree.selectedItems()

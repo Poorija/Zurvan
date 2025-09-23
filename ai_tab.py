@@ -648,6 +648,39 @@ class ChatBubble(QFrame):
         """Returns the alignment wrapper widget."""
         return self.wrapper
 
+import database
+import uuid
+
+class PromptParameterDialog(QDialog):
+    def __init__(self, parameters, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Fill in Prompt Parameters")
+        self.setMinimumWidth(350)
+        self.layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+        self.line_edits = {}
+
+        for param in sorted(list(set(parameters))): # Use set to get unique params
+            label = QLabel(f"{param.replace('_', ' ').title()}:")
+            line_edit = QLineEdit()
+            self.line_edits[param] = line_edit
+            form_layout.addRow(label, line_edit)
+
+        self.layout.addLayout(form_layout)
+
+        buttons_layout = QHBoxLayout()
+        ok_button = QPushButton("OK")
+        cancel_button = QPushButton("Cancel")
+        ok_button.clicked.connect(self.accept)
+        cancel_button.clicked.connect(self.reject)
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(ok_button)
+        buttons_layout.addWidget(cancel_button)
+        self.layout.addLayout(buttons_layout)
+
+    def get_values(self):
+        return {param: editor.text() for param, editor in self.line_edits.items()}
+
 class AIAssistantTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -656,6 +689,8 @@ class AIAssistantTab(QWidget):
         self.current_ai_bubble = None
         self.ai_thread = None
         self.completion_callback = None
+        self.session_id = None
+        self.user_id = self.parent.current_user['id'] if self.parent and self.parent.current_user else None
 
         self.ai_prompts = {
             "General Security & Analysis": {
@@ -671,6 +706,8 @@ class AIAssistantTab(QWidget):
                 "Latest CVEs for Tech": "What are the most recent critical CVEs (last 6 months) for Apache Tomcat version 9.x?",
                 "IOC Extraction": "Extract all Indicators of Compromise (IOCs) from the following text. Categorize them into IP addresses, domains, file hashes, and registry keys.",
                 "MITRE ATT&CK Mapping": "Map the following observed attacker techniques to the MITRE ATT&CK framework. Provide the Technique ID and a brief justification.",
+                "Threat Intelligence Analysis": "Analyze the following threat intelligence report and summarize the key findings, potential impacts, and recommended actions for our organization's industry: [Specify Industry].",
+                "Security News Briefing": "Provide a security briefing for this week, summarizing the top 3 most significant cybersecurity events, new CVEs, or emerging threats.",
             },
             "Reconnaissance & OSINT": {
                 "Subdomain Enumeration Strategy": "Outline a comprehensive strategy for subdomain enumeration for the domain {TARGET_DOMAIN}, using both passive and active techniques.",
@@ -713,6 +750,8 @@ class AIAssistantTab(QWidget):
                 "Test for Race Conditions": "Describe a scenario and methodology to test for a race condition vulnerability in a web application's coupon code feature.",
                 "XML External Entity (XXE)": "Provide an XXE payload to read the `/etc/passwd` file.",
                 "Deserialization Exploit": "Explain how to test for a Java deserialization vulnerability using the `ysoserial` tool.",
+                "Content Security Policy (CSP) Generation": "Generate a strict Content Security Policy (CSP) for a modern web application that uses locally-hosted scripts, styles from 'cdn.example.com', and connects to an API at 'api.example.com'.",
+                "CORS Misconfiguration Test": "Explain how to test for a Cross-Origin Resource Sharing (CORS) misconfiguration on the endpoint {TARGET_URL}. Provide a `curl` command to check the headers.",
             },
             "Malware Analysis & DFIR": {
                 "Static Malware Analysis": "I have a suspicious executable file. What are the first 5 steps I should take to perform static analysis without running the file?",
@@ -761,6 +800,9 @@ class AIAssistantTab(QWidget):
                 "Develop Encryption Policy": "Assist in developing a data encryption policy to protect sensitive data at rest and in transit, specifying required algorithms and key management procedures.",
                 "Create Employee Training Policy": "Guide the creation of an employee security training and awareness policy to promote a security-conscious culture within the organization.",
                 "Generate ROE Report": "You are a senior penetration testing engagement manager. Based on the provided target scope, generate a formal Rules of Engagement (ROE) document in Markdown format.",
+                "Incident Response Plan": "Create a step-by-step incident response plan for a potential ransomware attack, including containment, eradication, and recovery phases, and outlining a communication strategy.",
+                "BYOD Policy Draft": "Draft a comprehensive bring-your-own-device (BYOD) policy that addresses security concerns such as data encryption, access control, and remote wipe capabilities, while maintaining employee productivity.",
+                "Cloud Security Policy": "Create a security policy for using AWS. It should cover Identity and Access Management (IAM) best practices, data encryption standards for S3 and RDS, and logging/monitoring requirements using CloudTrail and CloudWatch.",
             },
         }
 
@@ -852,6 +894,32 @@ class AIAssistantTab(QWidget):
         self.ai_settings_btn.clicked.connect(self._show_ai_settings_menu)
 
         self.update_theme() # Set initial themed icons and styles
+        self._initialize_session_and_load_history()
+
+    def _initialize_session_and_load_history(self):
+        """Gets the latest session ID for the user or creates a new one, then loads history."""
+        if not self.user_id:
+            logging.warning("AI Assistant: No user ID found, history will not be saved.")
+            return
+
+        self.session_id = database.get_latest_session_id(self.user_id)
+        if not self.session_id:
+            self.session_id = str(uuid.uuid4())
+            logging.info(f"AI Assistant: No previous session found for user {self.user_id}. Starting new session: {self.session_id}")
+        else:
+            logging.info(f"AI Assistant: Resuming session {self.session_id} for user {self.user_id}.")
+            self._load_history()
+
+    def _load_history(self):
+        """Loads chat history from the database and populates the UI."""
+        if not self.user_id or not self.session_id:
+            return
+
+        history = database.get_chat_history(self.user_id, self.session_id)
+        for record in history:
+            role, content = record['role'], record['content']
+            is_user = (role == 'user')
+            self._add_chat_bubble(content, is_user)
 
     def update_theme(self):
         """Updates the icon color and other theme-dependent widgets."""
@@ -900,10 +968,27 @@ class AIAssistantTab(QWidget):
                 prompt_item.setToolTip(0, prompt_text)
 
     def _on_prompt_selected(self, item, column):
-        if item and item.parent():
-            prompt_text = item.data(0, Qt.ItemDataRole.UserRole)
-            if prompt_text:
-                self.user_input.setText(prompt_text)
+        if not item or not item.parent():
+            return
+
+        prompt_text = item.data(0, Qt.ItemDataRole.UserRole)
+        if not prompt_text:
+            return
+
+        # Find all placeholders like {PLACEHOLDER}
+        placeholders = re.findall(r'\{([A-Z_]+)\}', prompt_text)
+
+        if not placeholders:
+            self.user_input.setText(prompt_text)
+            return
+
+        dialog = PromptParameterDialog(placeholders, self)
+        if dialog.exec():
+            values = dialog.get_values()
+            formatted_prompt = prompt_text
+            for param, value in values.items():
+                formatted_prompt = formatted_prompt.replace(f"{{{param}}}", value)
+            self.user_input.setText(formatted_prompt)
 
     def _add_chat_bubble(self, message, is_user, is_streaming=False):
         # Create the bubble and its alignment wrapper
@@ -936,6 +1021,8 @@ class AIAssistantTab(QWidget):
         if not user_text:
             return
         self._add_chat_bubble(user_text, is_user=True)
+        if self.user_id and self.session_id:
+            database.add_chat_message(self.user_id, self.session_id, 'user', user_text)
         self.user_input.clear()
         self.start_ai_analysis(user_text)
 
@@ -988,6 +1075,10 @@ class AIAssistantTab(QWidget):
         final_text = ""
         if self.current_ai_bubble:
             final_text = self.current_ai_bubble.text_browser.toPlainText()
+
+        # Save assistant's final message to history
+        if self.user_id and self.session_id and final_text:
+            database.add_chat_message(self.user_id, self.session_id, 'assistant', final_text)
 
         if self.completion_callback and final_text:
             try:
