@@ -2048,6 +2048,107 @@ class Zurvan(QMainWindow):
             interval = int(text.replace('s', ''))
             self.resource_monitor_thread.set_interval(interval)
 
+    def _setup_app_lock_monitor(self):
+        """Initializes and starts the activity monitor and auto-lock timer."""
+        # Setup timer
+        self.auto_lock_timer = QTimer(self)
+        self.auto_lock_timer.setSingleShot(True)
+        self.auto_lock_timer.timeout.connect(self._show_lock_screen)
+
+        # Setup event filter
+        self.activity_monitor = ActivityMonitorEventFilter()
+        self.activity_monitor.user_active.connect(self._reset_auto_lock_timer)
+        QApplication.instance().installEventFilter(self.activity_monitor)
+
+        logging.info("App Lock activity monitor installed.")
+        self._reset_auto_lock_timer()
+
+    def _load_and_apply_user_settings(self):
+        """Loads user-specific settings from DB and applies them to the UI."""
+        if not self.current_user:
+            return
+
+        user_data = database.get_user_by_id(self.current_user['id'])
+        if not user_data:
+            return
+
+        # App Lock Timeout
+        self.app_lock_timeout_minutes = user_data.get('app_lock_timeout', 15)
+        for action in self.app_lock_timeout_group.actions():
+            if action.data() == self.app_lock_timeout_minutes:
+                action.setChecked(True)
+                break
+        self._reset_auto_lock_timer() # Start timer with loaded value
+
+        # App Lock Unlock Method
+        unlock_method = user_data.get('app_unlock_method', 'password')
+        for action in self.app_unlock_method_group.actions():
+            if action.text().lower().startswith(unlock_method):
+                action.setChecked(True)
+                break
+
+    def _reset_auto_lock_timer(self):
+        """Stops and restarts the auto-lock timer if a timeout is set."""
+        if self.auto_lock_timer and self.app_lock_timeout_minutes > 0:
+            self.auto_lock_timer.start(self.app_lock_timeout_minutes * 60 * 1000) # Convert minutes to ms
+
+    def _handle_auto_lock_change(self, action):
+        """Handles when the user changes the auto-lock timeout."""
+        self.app_lock_timeout_minutes = action.data()
+        if self.app_lock_timeout_minutes == 0:
+            self.auto_lock_timer.stop()
+            logging.info("Auto-lock timer disabled.")
+        else:
+            self._reset_auto_lock_timer()
+            logging.info(f"Auto-lock timeout set to {self.app_lock_timeout_minutes} minutes.")
+
+        # Save to DB
+        if self.current_user:
+            current_method_action = self.app_unlock_method_group.checkedAction()
+            current_method = "pin" if current_method_action and "pin" in current_method_action.text().lower() else "password"
+            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, current_method)
+
+    def _handle_unlock_method_change(self, action):
+        """Handles when the user changes the unlock method."""
+        method = "pin" if "pin" in action.text().lower() else "password"
+        logging.info(f"App unlock method changed to: {method}")
+        # Save to DB
+        if self.current_user:
+            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
+
+    def _show_lock_screen(self):
+        """Displays the application lock screen."""
+        if not self.current_user:
+            return # Should not happen if the UI is enabled, but good practice
+
+        # Re-fetch user data to get the latest settings
+        user_data = database.get_user_by_id(self.current_user['id'])
+        if not user_data:
+            QMessageBox.critical(self, "Error", "Could not retrieve current user data.")
+            return
+
+        unlock_method = user_data.get('app_unlock_method', 'password')
+        password_hash = user_data.get('password_hash')
+        pin_hash = user_data.get('pin_hash')
+
+        if unlock_method == 'pin' and not pin_hash:
+            QMessageBox.warning(self, "PIN Not Set", "Unlock method is set to PIN, but no PIN has been configured. Please set a PIN in your profile or change the unlock method.")
+            return
+
+        def verification_callback(entered_value):
+            """Nested function to verify the entered password or PIN."""
+            if unlock_method == 'password':
+                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == password_hash
+            elif unlock_method == 'pin':
+                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == pin_hash
+            return False
+
+        lock_dialog = AppLockDialog(
+            unlock_method=unlock_method,
+            verification_callback=verification_callback,
+            parent=self
+        )
+
     def _create_header_bar(self):
         """Creates the top header bar with interface and theme selectors."""
         header_frame = QWidget()
@@ -2239,169 +2340,6 @@ class Zurvan(QMainWindow):
             verification_callback=verification_callback,
             parent=self
         )
-        lock_dialog.exec()
-
-    def _setup_app_lock_monitor(self):
-        """Initializes and starts the activity monitor and auto-lock timer."""
-        # Setup timer
-        self.auto_lock_timer = QTimer(self)
-        self.auto_lock_timer.setSingleShot(True)
-        self.auto_lock_timer.timeout.connect(self._show_lock_screen)
-
-        # Setup event filter
-        self.activity_monitor = ActivityMonitorEventFilter()
-        self.activity_monitor.user_active.connect(self._reset_auto_lock_timer)
-        QApplication.instance().installEventFilter(self.activity_monitor)
-
-        logging.info("App Lock activity monitor installed.")
-        self._reset_auto_lock_timer()
-
-    def _load_and_apply_user_settings(self):
-        """Loads user-specific settings from DB and applies them to the UI."""
-        if not self.current_user:
-            return
-
-        user_data = database.get_user_by_id(self.current_user['id'])
-        if not user_data:
-            return
-
-        # App Lock Timeout
-        self.app_lock_timeout_minutes = user_data.get('app_lock_timeout', 15)
-        for action in self.app_lock_timeout_group.actions():
-            if action.data() == self.app_lock_timeout_minutes:
-                action.setChecked(True)
-                break
-        self._reset_auto_lock_timer() # Start timer with loaded value
-
-        # App Lock Unlock Method
-        unlock_method = user_data.get('app_unlock_method', 'password')
-        for action in self.app_unlock_method_group.actions():
-            if action.text().lower().startswith(unlock_method):
-                action.setChecked(True)
-                break
-
-    def _reset_auto_lock_timer(self):
-        """Stops and restarts the auto-lock timer if a timeout is set."""
-        if self.auto_lock_timer and self.app_lock_timeout_minutes > 0:
-            self.auto_lock_timer.start(self.app_lock_timeout_minutes * 60 * 1000) # Convert minutes to ms
-
-    def _handle_auto_lock_change(self, action):
-        """Handles when the user changes the auto-lock timeout."""
-        self.app_lock_timeout_minutes = action.data()
-        if self.app_lock_timeout_minutes == 0:
-            self.auto_lock_timer.stop()
-            logging.info("Auto-lock timer disabled.")
-        else:
-            self._reset_auto_lock_timer()
-            logging.info(f"Auto-lock timeout set to {self.app_lock_timeout_minutes} minutes.")
-
-        # Save to DB
-        if self.current_user:
-            current_method_action = self.app_unlock_method_group.checkedAction()
-            current_method = "pin" if current_method_action and "pin" in current_method_action.text().lower() else "password"
-            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, current_method)
-
-    def _handle_unlock_method_change(self, action):
-        """Handles when the user changes the unlock method."""
-        method = "pin" if "pin" in action.text().lower() else "password"
-        logging.info(f"App unlock method changed to: {method}")
-        # Save to DB
-        if self.current_user:
-            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
-
-    def _show_lock_screen(self):
-        """Displays the application lock screen."""
-        if not self.current_user:
-            return
-
-        user_data = database.get_user_by_id(self.current_user['id'])
-        if not user_data:
-            QMessageBox.critical(self, "Error", "Could not retrieve current user data.")
-            return
-
-        unlock_method = user_data.get('app_unlock_method', 'password')
-        password_hash = user_data.get('password_hash')
-        pin_hash = user_data.get('pin_hash')
-
-        if unlock_method == 'pin' and not pin_hash:
-            QMessageBox.warning(self, "PIN Not Set", "Unlock method is set to PIN, but no PIN has been configured. Please set a PIN in your profile or change the unlock method.")
-            return
-
-        def verification_callback(entered_value):
-            if unlock_method == 'password':
-                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == password_hash
-            elif unlock_method == 'pin':
-                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == pin_hash
-            return False
-
-        lock_dialog = AppLockDialog(
-            unlock_method=unlock_method,
-            verification_callback=verification_callback,
-            parent=self
-        )
-        lock_dialog.exec()
-
-    def _setup_app_lock_monitor(self):
-        """Initializes and starts the activity monitor and auto-lock timer."""
-        self.auto_lock_timer = QTimer(self)
-        self.auto_lock_timer.setSingleShot(True)
-        self.auto_lock_timer.timeout.connect(self._show_lock_screen)
-
-        self.activity_monitor = ActivityMonitorEventFilter()
-        self.activity_monitor.user_active.connect(self._reset_auto_lock_timer)
-        QApplication.instance().installEventFilter(self.activity_monitor)
-
-        logging.info("App Lock activity monitor installed.")
-        self._reset_auto_lock_timer()
-
-    def _load_and_apply_user_settings(self):
-        """Loads user-specific settings from DB and applies them to the UI."""
-        if not self.current_user:
-            return
-
-        user_data = database.get_user_by_id(self.current_user['id'])
-        if not user_data:
-            return
-
-        self.app_lock_timeout_minutes = user_data.get('app_lock_timeout', 15)
-        for action in self.app_lock_timeout_group.actions():
-            if action.data() == self.app_lock_timeout_minutes:
-                action.setChecked(True)
-                break
-        self._reset_auto_lock_timer()
-
-        unlock_method = user_data.get('app_unlock_method', 'password')
-        for action in self.app_unlock_method_group.actions():
-            if action.text().lower().startswith(unlock_method):
-                action.setChecked(True)
-                break
-
-    def _reset_auto_lock_timer(self):
-        """Stops and restarts the auto-lock timer if a timeout is set."""
-        if self.auto_lock_timer and self.app_lock_timeout_minutes > 0:
-            self.auto_lock_timer.start(self.app_lock_timeout_minutes * 60 * 1000)
-
-    def _handle_auto_lock_change(self, action):
-        """Handles when the user changes the auto-lock timeout."""
-        self.app_lock_timeout_minutes = action.data()
-        if self.app_lock_timeout_minutes == 0:
-            self.auto_lock_timer.stop()
-            logging.info("Auto-lock timer disabled.")
-        else:
-            self._reset_auto_lock_timer()
-            logging.info(f"Auto-lock timeout set to {self.app_lock_timeout_minutes} minutes.")
-
-        if self.current_user:
-            current_method_action = self.app_unlock_method_group.checkedAction()
-            current_method = "pin" if current_method_action and "pin" in current_method_action.text().lower() else "password"
-            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, current_method)
-
-    def _handle_unlock_method_change(self, action):
-        """Handles when the user changes the unlock method."""
-        method = "pin" if "pin" in action.text().lower() else "password"
-        logging.info(f"App unlock method changed to: {method}")
-        if self.current_user:
-            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
 
     def _handle_theme_change(self, theme_name):
         theme_file = f"{theme_name}.xml"
@@ -2519,12 +2457,11 @@ class Zurvan(QMainWindow):
         controls_layout.addWidget(self.refresh_history_btn)
         controls_layout.addStretch()
 
+        self.history_tree = QTreeWidget()
         export_btn = self._create_export_button(self.history_tree)
         controls_layout.addWidget(export_btn)
 
         layout.addLayout(controls_layout)
-
-        self.history_tree = QTreeWidget()
         self.history_tree.setColumnCount(4)
         self.history_tree.setHeaderLabels(["Timestamp", "Test Type", "Target", "Result Summary"])
         self.history_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -3219,8 +3156,15 @@ class Zurvan(QMainWindow):
 
     def _nmap_toggle_super_complete(self):
         """Toggles the 'Super Complete Scan' preset."""
-        controls = self.nmap_controls
-        if not self.super_scan_active:
+        # This now works for both the main tab and the LAB tab if the button is clicked there
+        # by finding which set of controls is currently visible.
+        controls = self.nmap_controls if self.nmap_controls['start_btn'].isVisible() else self.lab_tool_configs["Nmap Scan"]['controls']
+        output_console = self.nmap_output_console if self.nmap_controls['start_btn'].isVisible() else self.lab_output_console
+
+        # Determine if the preset is currently active for this specific UI context
+        is_active = controls.get('_super_scan_active', False)
+
+        if not is_active:
             controls['ports_edit'].setText("1-65535")
             controls['scan_type_combo'].setCurrentText("SYN Stealth Scan (-sS)")
             controls['timing_combo'].setCurrentText("T4 (Aggressive)")
@@ -3228,13 +3172,13 @@ class Zurvan(QMainWindow):
             controls['v_check'].setChecked(True)
 
             target = controls['target_edit'].text() or "[target]"
-            command_preview = self._build_nmap_command_preview(target)
-            self.nmap_output_console.clear()
-            self.nmap_output_console.setPlainText(f"# Preset command preview:\n$ {command_preview}")
+            command = self._build_nmap_command(controls, target)
+            output_console.clear()
+            output_console.setPlainText(f"# Preset command preview:\n$ {' '.join(command)}")
             QMessageBox.information(self, "Preset Loaded", "Super Complete Scan options have been set.\nClick 'Start Scan' to run, or click the preset button again to cancel.")
 
             controls['super_complete_btn'].setText("Cancel Super Scan")
-            self.super_scan_active = True
+            controls['_super_scan_active'] = True # Store state within the controls dict
         else:
             controls['ports_edit'].setText("")
             controls['scan_type_combo'].setCurrentIndex(0)
@@ -3243,107 +3187,457 @@ class Zurvan(QMainWindow):
             controls['v_check'].setChecked(False)
 
             controls['super_complete_btn'].setText("Super Complete Scan")
-            self.nmap_output_console.clear()
-            self.super_scan_active = False
+            output_console.clear()
+            controls['_super_scan_active'] = False
 
-    def _build_nmap_script_args(self):
-        """Builds the --script and --script-args parts of the nmap command."""
-        controls = self.nmap_controls
+    def _get_control_value(self, controls, key, widget_type):
+        """A helper to get a value from either a dictionary of widgets or a dictionary of values."""
+        # This check is fragile. A better approach would be to pass a flag, but this works for now.
+        is_lab_run = controls and not isinstance(next(iter(controls.values()), None), QWidget)
+
+        if is_lab_run:
+            if widget_type == 'check': return controls.get(key, False)
+            # For lab runs, the value is already a string or bool
+            return controls.get(key, "")
+        else: # It's a dict of widgets
+            if not controls or key not in controls: return None
+            widget = controls[key]
+            if widget_type == 'check': return widget.isChecked()
+            if widget_type == 'combo': return widget.currentText()
+            if widget_type == 'text': return widget.text() # Return raw text, strip later
+            if widget_type == 'enabled': return widget.isEnabled()
+        return None
+
+    def _build_nmap_script_args(self, controls):
+        """Builds the --script and --script-args parts of the nmap command, accepting a controls dict or widget dict."""
         script_parts = []
 
-        if controls['sc_check'].isChecked():
-            script_parts.append("default")
-        if controls['nse_vuln_check'].isChecked():
-            script_parts.append("vuln")
-        if controls['nse_discovery_check'].isChecked():
-            script_parts.append("discovery")
-        if controls['nse_safe_check'].isChecked():
-            script_parts.append("safe")
-        if custom_scripts := controls['custom_script_edit'].text().strip():
-            script_parts.append(custom_scripts)
+        if self._get_control_value(controls, 'sc_check', 'check'): script_parts.append("default")
+        if self._get_control_value(controls, 'nse_vuln_check', 'check'): script_parts.append("vuln")
+        if self._get_control_value(controls, 'nse_discovery_check', 'check'): script_parts.append("discovery")
+        if self._get_control_value(controls, 'nse_safe_check', 'check'): script_parts.append("safe")
+
+        custom_scripts = self._get_control_value(controls, 'custom_script_edit', 'text')
+        if custom_scripts and custom_scripts.strip():
+            script_parts.append(custom_scripts.strip())
 
         command_args = []
         if script_parts:
             unique_scripts = sorted(list(set(script_parts)))
             command_args.extend(["--script", ",".join(unique_scripts)])
-        if script_args := controls['script_args_edit'].text().strip():
-            command_args.extend(["--script-args", script_args])
+
+        script_args = self._get_control_value(controls, 'script_args_edit', 'text')
+        if script_args and script_args.strip():
+            command_args.extend(["--script-args", script_args.strip()])
 
         return command_args
 
-    def _build_nmap_command_preview(self, target):
-        """Helper to build a command string for preview purposes."""
-        controls = self.nmap_controls
-        command = ["nmap"]
-        command.append(controls['scan_type_combo'].currentText().split(" ")[-1].strip("()"))
-        command.append("-T" + controls['timing_combo'].currentText()[1])
-        if controls['a_check'].isChecked(): command.append("-A")
-        if controls['v_check'].isChecked(): command.append("-v")
-        if controls['pn_check'].isChecked(): command.append("-Pn")
-        if ports := controls['ports_edit'].text():
-            command.extend(["-p", ports])
-        command.extend(self._build_nmap_script_args())
-        command.append(target)
-        return " ".join(command)
+    def _build_gobuster_command(self, controls):
+        """Builds the Gobuster command list from a dictionary of controls or widgets."""
+        url = self._get_control_value(controls, 'url_edit', 'text')
+        wordlist = self._get_control_value(controls, 'wordlist_edit', 'text')
 
-    def start_nmap_scan(self):
-        """Starts the Nmap scan worker thread by building a command from the UI."""
-        controls = self.nmap_controls
-        if not shutil.which("nmap"):
-            QMessageBox.critical(self, "Nmap Error", "'nmap' command not found. Please ensure it is installed and in your system's PATH.")
-            return
+        if not url or not url.strip() or not wordlist or not wordlist.strip():
+            return None, None, "Target URL and Wordlist are required for Gobuster."
+
+        target_for_log = url.strip()
+        command = ["gobuster", "dir", "-u", target_for_log, "-w", wordlist.strip()]
+
+        if threads := self._get_control_value(controls, 'threads_edit', 'text'):
+            if threads.strip(): command.extend(["-t", threads.strip()])
+        if extensions := self._get_control_value(controls, 'extensions_edit', 'text'):
+            if extensions.strip(): command.extend(["-x", extensions.strip()])
+        if status_codes := self._get_control_value(controls, 'status_codes_edit', 'text'):
+            if status_codes.strip(): command.extend(["-s", status_codes.strip()])
+        if blacklist_codes := self._get_control_value(controls, 'status_codes_blacklist_edit', 'text'):
+            if blacklist_codes.strip(): command.extend(["-b", blacklist_codes.strip()])
+        if self._get_control_value(controls, 'add_slash_check', 'check'):
+            command.append("-f")
+        if self._get_control_value(controls, 'follow_redirect_check', 'check'):
+            command.append("-r")
+        if useragent := self._get_control_value(controls, 'useragent_edit', 'text'):
+            if useragent.strip(): command.extend(["-a", useragent.strip()])
+        if self._get_control_value(controls, 'random_agent_check', 'check'):
+            command.append("--random-agent")
+        if cookies := self._get_control_value(controls, 'cookies_edit', 'text'):
+            if cookies.strip(): command.extend(["-c", cookies.strip()])
+        if proxy := self._get_control_value(controls, 'proxy_edit', 'text'):
+            if proxy.strip(): command.extend(["--proxy", proxy.strip()])
+        if timeout := self._get_control_value(controls, 'timeout_edit', 'text'):
+            if timeout.strip(): command.extend(["--timeout", timeout.strip()])
+        if username := self._get_control_value(controls, 'username_edit', 'text'):
+            if username.strip(): command.extend(["-U", username.strip()])
+        if password := self._get_control_value(controls, 'password_edit', 'text'):
+            if password: command.extend(["-P", password])
+        if output_file := self._get_control_value(controls, 'output_file_edit', 'text'):
+            if output_file.strip(): command.extend(["-o", output_file.strip()])
+        if self._get_control_value(controls, 'no_progress_check', 'check'):
+            command.append("-z")
+        if self._get_control_value(controls, 'quiet_check', 'check'):
+            command.append("-q")
+        if self._get_control_value(controls, 'expanded_check', 'check'):
+            command.append("-e")
+
+        return command, target_for_log, None
+
+    def _build_nikto_command(self, controls):
+        """Builds the Nikto command list from a dictionary of controls or widgets."""
+        target = self._get_control_value(controls, 'target_edit', 'text')
+        if not target or not target.strip():
+            return None, None, "A target is required for Nikto."
+        target = target.strip()
+
+        command = ["nikto", "-host", target]
+
+        if port := self._get_control_value(controls, 'port_edit', 'text'):
+            if port.strip(): command.extend(["-port", port.strip()])
+        if self._get_control_value(controls, 'ssl_check', 'check'):
+            command.append("-ssl")
+        if vhost := self._get_control_value(controls, 'vhost_edit', 'text'):
+            if vhost.strip(): command.extend(["-vhost", vhost.strip()])
+        if (tuning_text := self._get_control_value(controls, 'tuning_combo', 'combo')) != "Default":
+            command.extend(["-Tuning", tuning_text.split(" ")[0]])
+        if (mutate_text := self._get_control_value(controls, 'mutate_combo', 'combo')) != "None":
+            command.extend(["-mutate", mutate_text.split(" ")[0]])
+        if plugins := self._get_control_value(controls, 'plugins_edit', 'text'):
+            if plugins.strip(): command.extend(["-Plugins", plugins.strip()])
+        if cgidirs := self._get_control_value(controls, 'cgidirs_edit', 'text'):
+            if cgidirs.strip(): command.extend(["-Cgidirs", cgidirs.strip()])
+        if (evasion_text := self._get_control_value(controls, 'evasion_combo', 'combo')) != "None":
+            command.extend(["-evasion", evasion_text.split(" ")[0]])
+        if (timeout := self._get_control_value(controls, 'timeout_edit', 'text')) != "10":
+            if timeout.strip(): command.extend(["-timeout", timeout.strip()])
+        if maxtime := self._get_control_value(controls, 'maxtime_edit', 'text'):
+            if maxtime.strip(): command.extend(["-maxtime", maxtime.strip()])
+        if pause := self._get_control_value(controls, 'pause_edit', 'text'):
+            if pause.strip(): command.extend(["-Pause", pause.strip()])
+        if auth_id := self._get_control_value(controls, 'id_edit', 'text'):
+            if auth_id.strip(): command.extend(["-id", auth_id.strip()])
+        if root := self._get_control_value(controls, 'root_edit', 'text'):
+            if root.strip(): command.extend(["-root", root.strip()])
+        if self._get_control_value(controls, 'proxy_check', 'check'):
+            command.append("-useproxy")
+        if output_file := self._get_control_value(controls, 'output_file_edit', 'text'):
+            if output_file.strip():
+                output_format = self._get_control_value(controls, 'format_combo', 'combo')
+                command.extend(["-o", output_file.strip(), "-Format", output_format])
+        if save_dir := self._get_control_value(controls, 'save_dir_edit', 'text'):
+            if save_dir.strip(): command.extend(["-Save", save_dir.strip()])
+        if extra_opts := self._get_control_value(controls, 'extra_opts_edit', 'text'):
+            if extra_opts.strip(): command.extend(extra_opts.strip().split())
+
+        return command, target, None
+
+    def _build_fierce_command(self, controls):
+        """Builds the fierce command list from a dictionary of controls or widgets."""
+        domain = self._get_control_value(controls, 'domain_edit', 'text')
+        if not domain or not domain.strip():
+            return None, None, "A domain is required for fierce."
+        domain = domain.strip()
+
+        command = ["fierce", "--domain", domain]
+
+        if self._get_control_value(controls, 'connect_check', 'check'):
+            command.append("--connect")
+        if self._get_control_value(controls, 'wide_check', 'check'):
+            command.append("--wide")
+        if traverse := self._get_control_value(controls, 'traverse_edit', 'text'):
+            if traverse.strip():
+                command.extend(["--traverse", traverse.strip()])
+        if delay := self._get_control_value(controls, 'delay_edit', 'text'):
+            if delay.strip():
+                command.extend(["--delay", delay.strip()])
+
+        return command, domain, None
+
+    def _build_dnsrecon_command(self, controls):
+        """Builds the dnsrecon command list from a dictionary of controls or widgets."""
+        domain = self._get_control_value(controls, 'domain_edit', 'text')
+        if not domain or not domain.strip():
+            return None, None, "A domain is required for dnsrecon."
+        domain = domain.strip()
+
+        command = ["dnsrecon", "-d", domain]
+
+        scan_type = self._get_control_value(controls, 'scan_type_combo', 'combo')
+        if scan_type:
+            command.extend(["-t", scan_type])
+
+        if scan_type == 'brt':
+            if dictionary := self._get_control_value(controls, 'dict_edit', 'text'):
+                if dictionary.strip():
+                    command.extend(["-D", dictionary.strip()])
+
+        if json_output := self._get_control_value(controls, 'json_output_edit', 'text'):
+            if json_output.strip():
+                command.extend(["--json", json_output.strip()])
+
+        return command, domain, None
+
+    def _build_enum4linux_ng_command(self, controls):
+        """Builds the enum4linux-ng command list from a dictionary of controls or widgets."""
+        target = self._get_control_value(controls, 'target_edit', 'text')
+        if not target or not target.strip():
+            return None, None, "A target host is required for enum4linux-ng."
+        target = target.strip()
+
+        command = ["enum4linux-ng"]
+
+        if self._get_control_value(controls, 'all_check', 'check'):
+            command.append("-A")
+        else:
+            if self._get_control_value(controls, 'users_check', 'check'): command.append("-U")
+            if self._get_control_value(controls, 'groups_check', 'check'): command.append("-G")
+            if self._get_control_value(controls, 'shares_check', 'check'): command.append("-S")
+            if self._get_control_value(controls, 'policy_check', 'check'): command.append("-P")
+            if self._get_control_value(controls, 'os_check', 'check'): command.append("-O")
+
+        if user := self._get_control_value(controls, 'user_edit', 'text'):
+            if user.strip():
+                command.extend(["-u", user.strip()])
+        if pwd := self._get_control_value(controls, 'pass_edit', 'text'):
+            if pwd: # Don't strip password
+                command.extend(["-p", pwd])
+
+        command.append(target)
+        return command, target, None
+
+    def _build_ffuf_command(self, controls):
+        """Builds the ffuf command list from a dictionary of controls or widgets."""
+        url = self._get_control_value(controls, 'url_edit', 'text')
+        wordlist = self._get_control_value(controls, 'wordlist_edit', 'text')
+
+        if not url or not url.strip() or not wordlist or not wordlist.strip():
+            return None, None, "Target URL and Wordlist are required for ffuf."
+
+        if "FUZZ" not in url:
+            return None, None, "Target URL must contain the 'FUZZ' keyword."
+
+        target_for_log = url.strip()
+        command = ["ffuf", "-u", target_for_log, "-w", wordlist.strip()]
+
+        if extensions := self._get_control_value(controls, 'extensions_edit', 'text'):
+            if extensions.strip():
+                command.extend(["-e", extensions.strip()])
+        if threads := self._get_control_value(controls, 'threads_edit', 'text'):
+            if threads.strip():
+                command.extend(["-t", threads.strip()])
+        if method := self._get_control_value(controls, 'method_edit', 'text'):
+            if method.strip():
+                command.extend(["-X", method.strip()])
+        if mc := self._get_control_value(controls, 'match_codes_edit', 'text'):
+            if mc.strip():
+                command.extend(["-mc", mc.strip()])
+        if fc := self._get_control_value(controls, 'filter_codes_edit', 'text'):
+            if fc.strip():
+                command.extend(["-fc", fc.strip()])
+
+        return command, target_for_log, None
+
+    def _build_dirsearch_command(self, controls):
+        """Builds the dirsearch command list from a dictionary of controls or widgets."""
+        url = self._get_control_value(controls, 'url_edit', 'text')
+        wordlist = self._get_control_value(controls, 'wordlist_edit', 'text')
+
+        if not url or not url.strip() or not wordlist or not wordlist.strip():
+            return None, None, "Target URL and Wordlist are required for dirsearch."
+
+        target_for_log = url.strip()
+        command = ["dirsearch", "-u", target_for_log, "-w", wordlist.strip()]
+
+        if extensions := self._get_control_value(controls, 'extensions_edit', 'text'):
+            if extensions.strip():
+                command.extend(["-e", extensions.strip()])
+        if threads := self._get_control_value(controls, 'threads_edit', 'text'):
+            if threads.strip():
+                command.extend(["-t", threads.strip()])
+        if self._get_control_value(controls, 'recursive_check', 'check'):
+            command.append("-r")
+
+        # We will always use a temporary json report for parsing, even if the user specifies one.
+        # The user-specified one will be for their own records.
+        if output_file := self._get_control_value(controls, 'output_edit', 'text'):
+            if output_file.strip():
+                command.extend(["--json-report", output_file.strip()])
+
+        command.append("--no-color")
+        return command, target_for_log, None
+
+    def _build_rustscan_command(self, controls):
+        """Builds the RustScan command list from a dictionary of controls or widgets."""
+        targets = self._get_control_value(controls, 'targets_edit', 'text')
+        if not targets or not targets.strip():
+            return None, None, "At least one target is required for RustScan."
+        targets = targets.strip()
+        target_for_log = targets
+
+        command = ["rustscan", "-a", targets]
+
+        if ports := self._get_control_value(controls, 'ports_edit', 'text'):
+            if ports.strip():
+                command.extend(["-p", ports.strip()])
+        if batch_size := self._get_control_value(controls, 'batch_size_edit', 'text'):
+            if batch_size.strip():
+                command.extend(["-b", batch_size.strip()])
+        if timeout := self._get_control_value(controls, 'timeout_edit', 'text'):
+            if timeout.strip():
+                command.extend(["-T", timeout.strip()])
+
+        if self._get_control_value(controls, 'quiet_check', 'check'):
+            command.append("-q")
+        else:
+            if nmap_args := self._get_control_value(controls, 'nmap_args_edit', 'text'):
+                if nmap_args.strip():
+                    command.append("--")
+                    command.extend(nmap_args.strip().split())
+
+        return command, target_for_log, None
+
+    def _build_httpx_command(self, controls):
+        """Builds the httpx command list from a dictionary of controls or widgets."""
+        target_list = self._get_control_value(controls, 'target_list_edit', 'text')
+        if not target_list or not target_list.strip():
+            return None, None, "A target list file is required for httpx."
+        target_list = target_list.strip()
+        target_for_log = target_list
+
+        command = ["httpx", "-l", target_list, "-silent"]
+
+        probe_flags = {
+            'probe_status_code': '-status-code',
+            'probe_title': '-title',
+            'probe_tech_detect': '-tech-detect',
+            'probe_web_server': '-web-server',
+            'probe_cdn': '-cdn',
+            'probe_jarm': '-jarm',
+        }
+        for control_name, flag in probe_flags.items():
+            if self._get_control_value(controls, control_name, 'check'):
+                command.append(flag)
+
+        if ports := self._get_control_value(controls, 'ports_edit', 'text'):
+            if ports.strip():
+                command.extend(["-ports", ports.strip()])
+
+        if self._get_control_value(controls, 'json_output_check', 'check'):
+            command.append("-json")
+
+        return command, target_for_log, None
+
+    def _build_subfinder_command(self, controls):
+        """Builds the Subfinder command list from a dictionary of controls or widgets."""
+        domain = self._get_control_value(controls, 'domain_edit', 'text')
+        if not domain or not domain.strip():
+            return None, None, "A domain is required for Subfinder."
+        domain = domain.strip()
+        target_for_log = domain
+
+        command = ["subfinder", "-d", domain, "-silent"]
+
+        if self._get_control_value(controls, 'recursive_check', 'check'):
+            command.append("-recursive")
+        if self._get_control_value(controls, 'all_sources_check', 'check'):
+            command.append("-all")
+        if output_file := self._get_control_value(controls, 'output_edit', 'text'):
+             if output_file.strip():
+                command.extend(["-o", output_file.strip()])
+
+        return command, target_for_log, None
+
+    def _build_sublist3r_command(self, controls):
+        """Builds the Sublist3r command list from a dictionary of controls or widgets."""
+        domain = self._get_control_value(controls, 'domain_edit', 'text')
+        if not domain or not domain.strip():
+            return None, None, "A domain is required for Sublist3r."
+        domain = domain.strip()
+        # The target for logging is the domain itself.
+        target_for_log = domain
+        command = ["python", "tools/sublist3r/sublist3r.py", "-d", domain]
+        return command, target_for_log, None
+
+    def _build_nmap_command(self, controls, target):
+        """Builds the Nmap command list from a dictionary of controls or widgets."""
+        command = ["nmap"]
+        scan_type_text = self._get_control_value(controls, 'scan_type_combo', 'combo')
+        if scan_type_text:
+            command.append(scan_type_text.split(" ")[-1].strip("()"))
+
+        timing_text = self._get_control_value(controls, 'timing_combo', 'combo')
+        if timing_text and len(timing_text) > 1:
+            command.append("-T" + timing_text[1])
+
+        if self._get_control_value(controls, 'a_check', 'check'):
+            command.append("-A")
+        else:
+            if self._get_control_value(controls, 'sv_check', 'check'): command.append("-sV")
+            if self._get_control_value(controls, 'o_check', 'check'): command.append("-O")
+            if self._get_control_value(controls, 'traceroute_check', 'check'): command.append("--traceroute")
+
+        if self._get_control_value(controls, 'pn_check', 'check'): command.append("-Pn")
+        if self._get_control_value(controls, 'v_check', 'check'): command.append("-v")
+
+        ports_are_enabled = self._get_control_value(controls, 'ports_edit', 'enabled')
+        if ports_are_enabled is None: # is_lab_run returns None for 'enabled'
+            ports_are_enabled = True
+
+        if ports_are_enabled:
+            ports = self._get_control_value(controls, 'ports_edit', 'text')
+            if ports and ports.strip():
+                command.extend(["-p", ports.strip()])
+            else:
+                command.extend(["--top-ports", "1000"])
+
+        command.extend(self._build_nmap_script_args(controls))
+        command.append(target)
+        return command
+
+    def _execute_lab_tool(self, tool_name, controls, output_widget):
+        """
+        A generic, asynchronous executor for any command-line tool that has a
+        config widget and an output console. It starts the tool in a WorkerThread.
+        This is used by the main UI tabs, NOT by the LAB chain executor.
+        """
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
-        target = controls['target_edit'].text()
-        if not target:
-            QMessageBox.critical(self, "Input Error", "Please provide a target for the Nmap scan.")
-            return
 
-        command = ["nmap"]
-        command.append(controls['scan_type_combo'].currentText().split(" ")[-1].strip("()"))
-        command.append("-T" + controls['timing_combo'].currentText()[1])
+        # --- Command Building ---
+        command = []
+        target_for_log = ""
 
-        if controls['a_check'].isChecked():
-            command.append("-A")
+        if tool_name == "Nmap Scan":
+            target_for_log = controls['target_edit'].text()
+            if not target_for_log:
+                QMessageBox.critical(self, "Input Error", "Please provide a target for the Nmap scan.")
+                return
+            command = self._build_nmap_command(controls, target_for_log)
         else:
-            if controls['sv_check'].isChecked(): command.append("-sV")
-            if controls['o_check'].isChecked(): command.append("-O")
-            if controls['traceroute_check'].isChecked(): command.append("--traceroute")
-
-        if controls['pn_check'].isChecked(): command.append("-Pn")
-        if controls['v_check'].isChecked(): command.append("-v")
-
-        if controls['ports_edit'].isEnabled():
-            if ports := controls['ports_edit'].text():
-                command.extend(["-p", ports])
-            else:
-                command.extend(["--top-ports", "1024"])
-
-        command.extend(self._build_nmap_script_args())
-
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".xml", encoding='utf-8') as tmp_xml:
-                self.nmap_xml_temp_file = tmp_xml.name
-            command.extend(["-oX", self.nmap_xml_temp_file])
-        except Exception as e:
-            QMessageBox.critical(self, "File Error", f"Could not create temporary file for Nmap report: {e}")
+            QMessageBox.critical(self, "Error", f"Execution logic for '{tool_name}' is not implemented yet.")
             return
 
-        command.append(target)
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, f"{tool_name} Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
+        # --- UI State Update ---
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
         controls['cancel_btn'].setEnabled(True)
-        controls['report_btn'].setEnabled(False)
+        if 'report_btn' in controls:
+            controls['report_btn'].setEnabled(False)
         self.tool_stop_event.clear()
-        self.nmap_output_console.clear()
+        output_widget.clear()
 
+        # --- Thread Execution ---
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'nmap_scan', target, self.nmap_output_console
+            command, f'{tool_name.lower().replace(" ", "_")}_scan', target_for_log, output_widget
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
+
+    def start_nmap_scan(self):
+        """Wrapper to start the Nmap scan from the main tools tab."""
+        self._execute_lab_tool("Nmap Scan", self.nmap_controls, self.nmap_output_console)
 
     def generate_nmap_report(self):
         """Saves the Nmap XML and generates a styled HTML report using lxml."""
@@ -3459,30 +3753,20 @@ class Zurvan(QMainWindow):
 
     def start_subfinder_scan(self):
         """Starts the Subfinder scan worker thread."""
-        controls = self.subfinder_controls
-        if not shutil.which("subfinder"):
-            QMessageBox.critical(self, "Subfinder Error", "'subfinder' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        domain = controls['domain_edit'].text().strip()
-        if not domain:
-            QMessageBox.critical(self, "Input Error", "Please provide a domain to scan.")
+        controls = self.subfinder_controls
+        command, target_for_log, error = self._build_subfinder_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["subfinder", "-d", domain, "-silent"]
-
-        if controls['recursive_check'].isChecked():
-            command.append("-recursive")
-
-        if controls['all_sources_check'].isChecked():
-            command.append("-all")
-
-        if output_file := controls['output_edit'].text().strip():
-            command.extend(["-o", output_file])
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Subfinder Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -3491,7 +3775,7 @@ class Zurvan(QMainWindow):
         self.subfinder_output.clear()
 
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'subfinder_scan', domain, self.subfinder_output
+            command, 'subfinder_scan', target_for_log, self.subfinder_output
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -3580,39 +3864,20 @@ class Zurvan(QMainWindow):
 
     def start_httpx_scan(self):
         """Starts the httpx scan worker thread."""
-        controls = self.httpx_controls
-        if not shutil.which("httpx"):
-            QMessageBox.critical(self, "httpx Error", "'httpx' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        target_list = controls['target_list_edit'].text().strip()
-        if not target_list:
-            QMessageBox.critical(self, "Input Error", "Please provide a target list file.")
+        controls = self.httpx_controls
+        command, target_for_log, error = self._build_httpx_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["httpx", "-l", target_list, "-silent"]
-
-        probe_flags = {
-            'probe_status_code': '-status-code',
-            'probe_title': '-title',
-            'probe_tech_detect': '-tech-detect',
-            'probe_web_server': '-web-server',
-            'probe_cdn': '-cdn',
-            'probe_jarm': '-jarm',
-        }
-        for control_name, flag in probe_flags.items():
-            if controls[control_name].isChecked():
-                command.append(flag)
-
-        if ports := controls['ports_edit'].text().strip():
-            command.extend(["-ports", ports])
-
-        if controls['json_output_check'].isChecked():
-            command.append("-json")
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "httpx Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -3621,7 +3886,7 @@ class Zurvan(QMainWindow):
         self.httpx_output.clear()
 
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'httpx_scan', target_list, self.httpx_output
+            command, 'httpx_scan', target_for_log, self.httpx_output
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -3692,37 +3957,20 @@ class Zurvan(QMainWindow):
 
     def start_rustscan_scan(self, sudo_password=None):
         """Starts the RustScan worker thread, prompting for sudo if necessary."""
-        controls = self.rustscan_controls
-        if not shutil.which("rustscan"):
-            QMessageBox.critical(self, "RustScan Error", "'rustscan' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running and not sudo_password:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        targets = controls['targets_edit'].text().strip()
-        if not targets:
-            QMessageBox.critical(self, "Input Error", "Please provide at least one target.")
+        controls = self.rustscan_controls
+        command, target_for_log, error = self._build_rustscan_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["rustscan", "-a", targets]
-
-        if ports := controls['ports_edit'].text().strip():
-            command.extend(["-p", ports])
-
-        if batch_size := controls['batch_size_edit'].text().strip():
-            command.extend(["-b", batch_size])
-
-        if timeout := controls['timeout_edit'].text().strip():
-            command.extend(["-T", timeout])
-
-        if controls['quiet_check'].isChecked():
-            command.append("-q")
-        else:
-            if nmap_args := controls['nmap_args_edit'].text().strip():
-                command.append("--")
-                command.extend(nmap_args.split())
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "RustScan Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         # Rustscan needs root for raw socket access.
         if not sudo_password and sys.platform != "win32":
@@ -3741,7 +3989,7 @@ class Zurvan(QMainWindow):
         self.rustscan_output.clear()
 
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'rustscan_scan', targets, self.rustscan_output, sudo_password
+            command, 'rustscan_scan', target_for_log, self.rustscan_output, sudo_password
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -3819,40 +4067,31 @@ class Zurvan(QMainWindow):
 
     def start_dirsearch_scan(self):
         """Starts the dirsearch scan worker thread."""
-        controls = self.dirsearch_controls
-        if not shutil.which("dirsearch"):
-            QMessageBox.critical(self, "dirsearch Error", "'dirsearch' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        url = controls['url_edit'].text().strip()
-        wordlist = controls['wordlist_edit'].text().strip()
+        controls = self.dirsearch_controls
+        command, target_for_log, error = self._build_dirsearch_command(controls)
 
-        if not url or not wordlist:
-            QMessageBox.critical(self, "Input Error", "Target URL and Wordlist are required.")
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["dirsearch", "-u", url, "-w", wordlist]
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "dirsearch Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
-        if extensions := controls['extensions_edit'].text().strip():
-            command.extend(["-e", extensions])
-        if threads := controls['threads_edit'].text().strip():
-            command.extend(["-t", threads])
-        if controls['recursive_check'].isChecked():
-            command.append("-r")
-
+        # Create a temporary file for the JSON report for parsing, regardless of user setting
         try:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_json:
                 self.dirsearch_json_temp_file = tmp_json.name
+            # Remove any user-specified report path and add our temp one
+            command = [arg for arg in command if not arg.startswith('--json-report')]
             command.extend(["--json-report", self.dirsearch_json_temp_file])
         except Exception as e:
             QMessageBox.critical(self, "File Error", f"Could not create temporary file for dirsearch report: {e}")
             return
-
-        command.append("--no-color")
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -3861,7 +4100,7 @@ class Zurvan(QMainWindow):
         self.dirsearch_output_console.clear()
 
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'dirsearch_scan', url, self.dirsearch_output_console
+            command, 'dirsearch_scan', target_for_log, self.dirsearch_output_console
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -3938,39 +4177,22 @@ class Zurvan(QMainWindow):
 
     def start_ffuf_scan(self):
         """Starts the ffuf scan worker thread."""
-        controls = self.ffuf_controls
-        if not shutil.which("ffuf"):
-            QMessageBox.critical(self, "ffuf Error", "'ffuf' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        url = controls['url_edit'].text().strip()
-        wordlist = controls['wordlist_edit'].text().strip()
+        controls = self.ffuf_controls
+        command, target_for_log, error = self._build_ffuf_command(controls)
 
-        if not url or not wordlist:
-            QMessageBox.critical(self, "Input Error", "Target URL and Wordlist are required.")
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        if "FUZZ" not in url:
-            QMessageBox.critical(self, "Input Error", "Target URL must contain the 'FUZZ' keyword.")
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "ffuf Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
             return
 
-        command = ["ffuf", "-u", url, "-w", wordlist]
-
-        if extensions := controls['extensions_edit'].text().strip():
-            command.extend(["-e", extensions])
-        if threads := controls['threads_edit'].text().strip():
-            command.extend(["-t", threads])
-        if method := controls['method_edit'].text().strip():
-            command.extend(["-X", method])
-        if mc := controls['match_codes_edit'].text().strip():
-            command.extend(["-mc", mc])
-        if fc := controls['filter_codes_edit'].text().strip():
-            command.extend(["-fc", fc])
-
+        # Always use a temporary file for JSON output for parsing
         try:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_json:
                 self.ffuf_json_temp_file = tmp_json.name
@@ -3986,7 +4208,7 @@ class Zurvan(QMainWindow):
         self.ffuf_output_console.clear()
 
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'ffuf_scan', url, self.ffuf_output_console
+            command, 'ffuf_scan', target_for_log, self.ffuf_output_console
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -4065,45 +4287,29 @@ class Zurvan(QMainWindow):
 
     def start_enum4linux_ng_scan(self):
         """Starts the enum4linux-ng scan worker thread."""
-        controls = self.enum4linux_ng_controls
-        if not shutil.which("enum4linux-ng"):
-            QMessageBox.critical(self, "enum4linux-ng Error", "'enum4linux-ng' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        target = controls['target_edit'].text().strip()
-        if not target:
-            QMessageBox.critical(self, "Input Error", "A target host is required.")
+        controls = self.enum4linux_ng_controls
+        command, target_for_log, error = self._build_enum4linux_ng_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["enum4linux-ng"]
-
-        if controls['all_check'].isChecked():
-            command.append("-A")
-        else:
-            if controls['users_check'].isChecked(): command.append("-U")
-            if controls['groups_check'].isChecked(): command.append("-G")
-            if controls['shares_check'].isChecked(): command.append("-S")
-            if controls['policy_check'].isChecked(): command.append("-P")
-            if controls['os_check'].isChecked(): command.append("-O")
-
-        if user := controls['user_edit'].text().strip():
-            command.extend(["-u", user])
-        if pwd := controls['pass_edit'].text().strip():
-            command.extend(["-p", pwd])
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "enum4linux-ng Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         try:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_json:
                 self.enum4linux_ng_json_temp_file = tmp_json.name
-            command.extend(["-oJ", self.enum4linux_ng_json_temp_file])
+            command.insert(1, "-oJ")
+            command.insert(2, self.enum4linux_ng_json_temp_file)
         except Exception as e:
             QMessageBox.critical(self, "File Error", f"Could not create temporary file for enum4linux-ng report: {e}")
             return
-
-        command.append(target)
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -4112,7 +4318,7 @@ class Zurvan(QMainWindow):
         self.enum4linux_ng_output_console.clear()
 
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'enum4linux_ng_scan', target, self.enum4linux_ng_output_console
+            command, 'enum4linux_ng_scan', target_for_log, self.enum4linux_ng_output_console
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -4188,34 +4394,27 @@ class Zurvan(QMainWindow):
 
     def start_dnsrecon_scan(self):
         """Starts the dnsrecon scan worker thread."""
-        controls = self.dnsrecon_controls
-        if not shutil.which("dnsrecon"):
-            QMessageBox.critical(self, "dnsrecon Error", "'dnsrecon' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        domain = controls['domain_edit'].text().strip()
-        if not domain:
-            QMessageBox.critical(self, "Input Error", "A domain is required.")
+        controls = self.dnsrecon_controls
+        command, target_for_log, error = self._build_dnsrecon_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["dnsrecon", "-d", domain]
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "dnsrecon Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
-        scan_type = controls['scan_type_combo'].currentText()
-        command.extend(["-t", scan_type])
-
-        if scan_type == 'brt':
-            if dictionary := controls['dict_edit'].text().strip():
-                command.extend(["-D", dictionary])
-            else:
-                QMessageBox.warning(self, "Input Warning", "Brute-force scan selected but no dictionary file was provided. Using default wordlist.")
-
+        # Always use a temporary file for JSON output for parsing
         try:
             with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_json:
                 self.dnsrecon_json_temp_file = tmp_json.name
+            # Remove any user-specified report path and add our temp one
+            command = [arg for arg in command if not arg.startswith('--json')]
             command.extend(["--json", self.dnsrecon_json_temp_file])
         except Exception as e:
             QMessageBox.critical(self, "File Error", f"Could not create temporary file for dnsrecon report: {e}")
@@ -4228,7 +4427,7 @@ class Zurvan(QMainWindow):
         self.dnsrecon_output_console.clear()
 
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'dnsrecon_scan', domain, self.dnsrecon_output_console
+            command, 'dnsrecon_scan', target_for_log, self.dnsrecon_output_console
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -4291,30 +4490,20 @@ class Zurvan(QMainWindow):
 
     def start_fierce_scan(self):
         """Starts the fierce scan worker thread."""
-        controls = self.fierce_controls
-        if not shutil.which("fierce"):
-            QMessageBox.critical(self, "fierce Error", "'fierce' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        domain = controls['domain_edit'].text().strip()
-        if not domain:
-            QMessageBox.critical(self, "Input Error", "A domain is required.")
+        controls = self.fierce_controls
+        command, target_for_log, error = self._build_fierce_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["fierce", "--domain", domain]
-
-        if controls['connect_check'].isChecked():
-            command.append("--connect")
-        if controls['wide_check'].isChecked():
-            command.append("--wide")
-        if traverse := controls['traverse_edit'].text().strip():
-            command.extend(["--traverse", traverse])
-        if delay := controls['delay_edit'].text().strip():
-            command.extend(["--delay", delay])
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "fierce Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -4322,7 +4511,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.fierce_output_console.clear()
 
-        self.worker = WorkerThread(self._fierce_thread, args=(command, domain))
+        self.worker = WorkerThread(self._fierce_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -4439,15 +4628,21 @@ class Zurvan(QMainWindow):
         return widget, controls
 
     def start_sublist3r_scan(self):
-        """Starts the Sublist3r scan worker thread using the generic command executor."""
-        controls = self.subdomain_controls
+        """Starts the Sublist3r scan worker thread."""
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        domain = controls['domain_edit'].text()
-        if not domain:
-            QMessageBox.critical(self, "Input Error", "Please provide a domain to scan.")
+        controls = self.subdomain_controls
+        command, target_for_log, error = self._build_sublist3r_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
+            return
+
+        sublist3r_path = os.path.join("tools", "sublist3r", "sublist3r.py")
+        if not os.path.exists(sublist3r_path):
+            QMessageBox.critical(self, "Tool Error", f"'sublist3r.py' not found at {sublist3r_path}")
             return
 
         self.is_tool_running = True
@@ -4456,9 +4651,8 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.sublist3r_output.clear()
 
-        command = ["python", "tools/sublist3r/sublist3r.py", "-d", domain]
         self.worker = WorkerThread(self._execute_command_thread, args=(
-            command, 'sublist3r_scan', domain, self.sublist3r_output
+            command, 'sublist3r_scan', target_for_log, self.sublist3r_output
         ))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -4565,7 +4759,7 @@ class Zurvan(QMainWindow):
         output_file_layout = QHBoxLayout()
         controls['output_file_edit'] = QLineEdit(); controls['output_file_edit'].setPlaceholderText("Optional: path to save report...")
         output_file_layout.addWidget(controls['output_file_edit'])
-        browse_out_btn = QPushButton("Browse..."); browse_out_btn.clicked.connect(self.browse_nikto_output)
+        browse_out_btn = QPushButton("Browse..."); browse_out_btn.clicked.connect(lambda: self._browse_save_file_for_lineedit(controls['output_file_edit'], "Save Nikto Report", "HTML Files (*.html);;CSV Files (*.csv);;Text Files (*.txt);;XML Files (*.xml);;All Files (*)"))
         output_file_layout.addWidget(browse_out_btn)
         output_layout.addRow("Output File:", output_file_layout)
         controls['format_combo'] = QComboBox(); controls['format_combo'].addItems(["html", "csv", "txt", "xml", "nbe"]); controls['format_combo'].setToolTip("Select the report format (requires an output file to be set).")
@@ -4573,7 +4767,7 @@ class Zurvan(QMainWindow):
         save_dir_layout = QHBoxLayout()
         controls['save_dir_edit'] = QLineEdit(); controls['save_dir_edit'].setPlaceholderText("Optional: directory to save positive responses...")
         save_dir_layout.addWidget(controls['save_dir_edit'])
-        browse_save_btn = QPushButton("Browse..."); browse_save_btn.clicked.connect(self.browse_nikto_save_dir)
+        browse_save_btn = QPushButton("Browse..."); browse_save_btn.clicked.connect(lambda: self._browse_dir_for_lineedit(controls['save_dir_edit'], "Select Directory to Save Responses"))
         save_dir_layout.addWidget(browse_save_btn)
         output_layout.addRow("Save Directory:", save_dir_layout)
         nikto_tabs.addTab(output_tab, "Output")
@@ -4589,57 +4783,21 @@ class Zurvan(QMainWindow):
         return widget, controls
 
     def start_nikto_scan(self):
-        """Starts the Nikto scan worker thread by building a command from the extensive UI options."""
-        controls = self.nikto_controls
-        if not shutil.which("nikto"):
-            QMessageBox.critical(self, "Nikto Error", "'nikto' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
+        """Starts the Nikto scan worker thread."""
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        target = controls['target_edit'].text().strip()
-        if not target:
-            QMessageBox.critical(self, "Input Error", "A target host is required.")
-            return
-        command = ["nikto", "-host", target]
+        controls = self.nikto_controls
+        command, target_for_log, error = self._build_nikto_command(controls)
 
-        if port := controls['port_edit'].text().strip():
-            command.extend(["-port", port])
-        if controls['ssl_check'].isChecked():
-            command.append("-ssl")
-        if vhost := controls['vhost_edit'].text().strip():
-            command.extend(["-vhost", vhost])
-        if (tuning_text := controls['tuning_combo'].currentText()) != "Default":
-            command.extend(["-Tuning", tuning_text.split(" ")[0]])
-        if (mutate_text := controls['mutate_combo'].currentText()) != "None":
-            command.extend(["-mutate", mutate_text.split(" ")[0]])
-        if plugins := controls['plugins_edit'].text().strip():
-            command.extend(["-Plugins", plugins])
-        if cgidirs := controls['cgidirs_edit'].text().strip():
-            command.extend(["-Cgidirs", cgidirs])
-        if (evasion_text := controls['evasion_combo'].currentText()) != "None":
-            command.extend(["-evasion", evasion_text.split(" ")[0]])
-        if (timeout := controls['timeout_edit'].text().strip()) != "10":
-            command.extend(["-timeout", timeout])
-        if maxtime := controls['maxtime_edit'].text().strip():
-            command.extend(["-maxtime", maxtime])
-        if pause := controls['pause_edit'].text().strip():
-            command.extend(["-Pause", pause])
-        if auth_id := controls['id_edit'].text().strip():
-            command.extend(["-id", auth_id])
-        if root := controls['root_edit'].text().strip():
-            command.extend(["-root", root])
-        if controls['proxy_check'].isChecked():
-            command.append("-useproxy")
-        if output_file := controls['output_file_edit'].text().strip():
-            output_format = controls['format_combo'].currentText()
-            command.extend(["-o", output_file, "-Format", output_format])
-        if save_dir := controls['save_dir_edit'].text().strip():
-            command.extend(["-Save", save_dir])
-        if extra_opts := controls['extra_opts_edit'].text().strip():
-            command.extend(extra_opts.split())
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
+            return
+
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Nikto Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -4647,7 +4805,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.nikto_output_console.clear()
 
-        self.worker = WorkerThread(self._nikto_thread, args=(command, target))
+        self.worker = WorkerThread(self._nikto_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -4707,7 +4865,7 @@ class Zurvan(QMainWindow):
         wordlist_layout = QHBoxLayout()
         controls['wordlist_edit'] = QLineEdit(); controls['wordlist_edit'].setPlaceholderText("Path to wordlist file (required)..."); controls['wordlist_edit'].setToolTip("The path to the wordlist file to use for brute-forcing directories and files.")
         wordlist_layout.addWidget(controls['wordlist_edit'])
-        browse_wordlist_btn = QPushButton("Browse..."); browse_wordlist_btn.clicked.connect(self.browse_gobuster_wordlist)
+        browse_wordlist_btn = QPushButton("Browse..."); browse_wordlist_btn.clicked.connect(lambda: self._browse_file_for_lineedit(controls['wordlist_edit'], "Select Wordlist File"))
         wordlist_layout.addWidget(browse_wordlist_btn)
         scan_layout.addRow("Wordlist:", wordlist_layout)
 
@@ -4751,7 +4909,7 @@ class Zurvan(QMainWindow):
         output_file_layout = QHBoxLayout()
         controls['output_file_edit'] = QLineEdit(); controls['output_file_edit'].setPlaceholderText("Optional: path to save output file...")
         output_file_layout.addWidget(controls['output_file_edit'])
-        browse_out_btn = QPushButton("Browse..."); browse_out_btn.clicked.connect(self.browse_gobuster_output)
+        browse_out_btn = QPushButton("Browse..."); browse_out_btn.clicked.connect(lambda: self._browse_save_file_for_lineedit(controls['output_file_edit'], "Save Gobuster Output"))
         output_file_layout.addWidget(browse_out_btn)
         output_layout.addRow("Output File:", output_file_layout)
 
@@ -4770,70 +4928,22 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
-    def browse_gobuster_wordlist(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Wordlist File", "", "Text Files (*.txt);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            self.gobuster_controls['wordlist_edit'].setText(file_path)
-
-    def browse_gobuster_output(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Gobuster Output", "", "Text Files (*.txt);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            self.gobuster_controls['output_file_edit'].setText(file_path)
-
     def start_gobuster_scan(self):
         """Starts the Gobuster scan worker thread."""
-        controls = self.gobuster_controls
-        if not shutil.which("gobuster"):
-            QMessageBox.critical(self, "Gobuster Error", "'gobuster' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        url = controls['url_edit'].text().strip()
-        wordlist = controls['wordlist_edit'].text().strip()
+        controls = self.gobuster_controls
+        command, target_for_log, error = self._build_gobuster_command(controls)
 
-        if not url or not wordlist:
-            QMessageBox.critical(self, "Input Error", "Target URL and Wordlist are required.")
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["gobuster", "dir", "-u", url, "-w", wordlist]
-
-        if threads := controls['threads_edit'].text().strip():
-            command.extend(["-t", threads])
-        if extensions := controls['extensions_edit'].text().strip():
-            command.extend(["-x", extensions])
-        if status_codes := controls['status_codes_edit'].text().strip():
-            command.extend(["-s", status_codes])
-        if blacklist_codes := controls['status_codes_blacklist_edit'].text().strip():
-            command.extend(["-b", blacklist_codes])
-        if controls['add_slash_check'].isChecked():
-            command.append("-f")
-        if controls['follow_redirect_check'].isChecked():
-            command.append("-r")
-        if useragent := controls['useragent_edit'].text().strip():
-            command.extend(["-a", useragent])
-        if controls['random_agent_check'].isChecked():
-            command.append("--random-agent")
-        if cookies := controls['cookies_edit'].text().strip():
-            command.extend(["-c", cookies])
-        if proxy := controls['proxy_edit'].text().strip():
-            command.extend(["--proxy", proxy])
-        if timeout := controls['timeout_edit'].text().strip():
-            command.extend(["--timeout", timeout])
-        if username := controls['username_edit'].text().strip():
-            command.extend(["-U", username])
-        if password := controls['password_edit'].text().strip():
-            command.extend(["-P", password])
-        if output_file := controls['output_file_edit'].text().strip():
-            command.extend(["-o", output_file])
-        if controls['no_progress_check'].isChecked():
-            command.append("-z")
-        if controls['quiet_check'].isChecked():
-            command.append("-q")
-        if controls['expanded_check'].isChecked():
-            command.append("-e")
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Gobuster Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -4841,7 +4951,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.gobuster_output_console.clear()
 
-        self.worker = WorkerThread(self._gobuster_thread, args=(command, url))
+        self.worker = WorkerThread(self._gobuster_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -4987,7 +5097,7 @@ class Zurvan(QMainWindow):
         controls['reqfile_edit'].setToolTip("Load a raw HTTP request from a file (e.g., from Burp Suite).\nThis is often more reliable than using the URL field, especially for complex requests with headers and POST data.")
         req_file_layout.addWidget(controls['reqfile_edit'])
         browse_req_btn = QPushButton("Browse...")
-        browse_req_btn.clicked.connect(self.browse_sqlmap_request_file)
+        browse_req_btn.clicked.connect(lambda: self._browse_file_for_lineedit(controls['reqfile_edit'], "Select Request File"))
         req_file_layout.addWidget(browse_req_btn)
         target_layout.addRow("Request File (-r):", req_file_layout)
         sqlmap_tabs.addTab(target_tab, "Target")
@@ -5133,97 +5243,127 @@ class Zurvan(QMainWindow):
 
         return widget
 
-    def browse_sqlmap_request_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Request File", "", "All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            # Check if we are on the main SQLMap tab
-            if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "sqlmap_output_console"):
-                self.sqlmap_controls['reqfile_edit'].setText(file_path)
-            else: # We are in the LAB tab
-                for tool_name, config_data in self.lab_tool_configs.items():
-                    if config_data['widget'].isVisible() and tool_name == "SQLMap":
-                        config_data['controls']['reqfile_edit'].setText(file_path)
-                        break
-
-    def start_sqlmap_scan(self):
-        """Starts the SQLMap scan worker thread."""
-        controls = self.sqlmap_controls
-        if not shutil.which("sqlmap"):
-            QMessageBox.critical(self, "SQLMap Error", "'sqlmap' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
-        if self.is_tool_running:
-            QMessageBox.warning(self, "Busy", "Another tool is already running.")
-            return
-
+    def _build_sqlmap_command(self, controls):
+        """Builds the SQLMap command list from a dictionary of controls or widgets."""
         command = ["sqlmap"]
+        target_for_log = ""
 
         # --- Target Tab ---
-        url = controls['url_edit'].text().strip()
-        reqfile = controls['reqfile_edit'].text().strip()
-        if url:
-            command.extend(["-u", url])
-        elif reqfile:
-            command.extend(["-r", reqfile])
+        url = self._get_control_value(controls, 'url_edit', 'text')
+        reqfile = self._get_control_value(controls, 'reqfile_edit', 'text')
+        if url and url.strip():
+            target_for_log = url.strip()
+            command.extend(["-u", target_for_log])
+        elif reqfile and reqfile.strip():
+            target_for_log = reqfile.strip()
+            command.extend(["-r", target_for_log])
         else:
-            QMessageBox.critical(self, "Input Error", "A Target URL (-u) or Request File (-r) is required.")
-            return
+            return None, None, "A Target URL (-u) or Request File (-r) is required."
 
         # --- Request Tab ---
-        if method := controls['method_edit'].text().strip(): command.extend(["--method", method])
-        if data := controls['data_edit'].text().strip(): command.extend(["--data", data])
-        if cookie := controls['cookie_edit'].text().strip(): command.extend(["--cookie", cookie])
-        if agent := controls['useragent_edit'].text().strip(): command.extend(["--user-agent", agent])
-        if referer := controls['referer_edit'].text().strip(): command.extend(["--referer", referer])
-        if headers := controls['headers_edit'].toPlainText().strip(): command.extend(["--headers", headers])
-        if auth_type := controls['auth_type_edit'].text().strip(): command.extend(["--auth-type", auth_type])
-        if auth_cred := controls['auth_cred_edit'].text().strip(): command.extend(["--auth-cred", auth_cred])
-        if proxy := controls['proxy_edit'].text().strip(): command.extend(["--proxy", proxy])
-        if controls['random_agent_check'].isChecked(): command.append("--random-agent")
-        if controls['force_ssl_check'].isChecked(): command.append("--force-ssl")
+        if method := self._get_control_value(controls, 'method_edit', 'text'):
+            if method.strip(): command.extend(["--method", method.strip()])
+        if data := self._get_control_value(controls, 'data_edit', 'text'):
+            if data.strip(): command.extend(["--data", data.strip()])
+        if cookie := self._get_control_value(controls, 'cookie_edit', 'text'):
+            if cookie.strip(): command.extend(["--cookie", cookie.strip()])
+        if agent := self._get_control_value(controls, 'useragent_edit', 'text'):
+            if agent.strip(): command.extend(["--user-agent", agent.strip()])
+        if referer := self._get_control_value(controls, 'referer_edit', 'text'):
+            if referer.strip(): command.extend(["--referer", referer.strip()])
+
+        # Special handling for QTextEdit
+        is_lab_run = not isinstance(controls.get('headers_edit'), QWidget) if 'headers_edit' in controls else True
+        if is_lab_run:
+            headers = controls.get('headers_edit', '')
+        else:
+            headers = controls['headers_edit'].toPlainText().strip()
+        if headers:
+            command.extend(["--headers", headers])
+
+        if auth_type := self._get_control_value(controls, 'auth_type_edit', 'text'):
+            if auth_type.strip(): command.extend(["--auth-type", auth_type.strip()])
+        if auth_cred := self._get_control_value(controls, 'auth_cred_edit', 'text'):
+            if auth_cred.strip(): command.extend(["--auth-cred", auth_cred.strip()])
+        if proxy := self._get_control_value(controls, 'proxy_edit', 'text'):
+            if proxy.strip(): command.extend(["--proxy", proxy.strip()])
+
+        if self._get_control_value(controls, 'random_agent_check', 'check'): command.append("--random-agent")
+        if self._get_control_value(controls, 'force_ssl_check', 'check'): command.append("--force-ssl")
 
         # --- Injection Tab ---
-        if test_param := controls['test_param_edit'].text().strip(): command.extend(["-p", test_param])
-        if dbms := controls['dbms_edit'].text().strip(): command.extend(["--dbms", dbms])
-        command.extend(["--level", controls['level_combo'].currentText()])
-        command.extend(["--risk", controls['risk_combo'].currentText()])
-        if tech := controls['technique_edit'].text().strip(): command.extend(["--technique", tech])
+        if test_param := self._get_control_value(controls, 'test_param_edit', 'text'):
+            if test_param.strip(): command.extend(["-p", test_param.strip()])
+        if dbms := self._get_control_value(controls, 'dbms_edit', 'text'):
+            if dbms.strip(): command.extend(["--dbms", dbms.strip()])
+
+        level = self._get_control_value(controls, 'level_combo', 'combo') or '1'
+        command.extend(["--level", level])
+
+        risk = self._get_control_value(controls, 'risk_combo', 'combo') or '1'
+        command.extend(["--risk", risk])
+
+        if tech := self._get_control_value(controls, 'technique_edit', 'text'):
+            if tech.strip(): command.extend(["--technique", tech.strip()])
 
         # --- Enumeration Tab ---
-        if controls['enum_all_check'].isChecked(): command.append("-a")
-        if controls['enum_banner_check'].isChecked(): command.append("-b")
-        if controls['enum_current_user_check'].isChecked(): command.append("--current-user")
-        if controls['enum_current_db_check'].isChecked(): command.append("--current-db")
-        if controls['enum_is_dba_check'].isChecked(): command.append("--is-dba")
-        if controls['enum_passwords_check'].isChecked(): command.append("--passwords")
-        if controls['enum_dbs_check'].isChecked(): command.append("--dbs")
-        if controls['enum_tables_check'].isChecked(): command.append("--tables")
-        if controls['enum_columns_check'].isChecked(): command.append("--columns")
-        if controls['enum_schema_check'].isChecked(): command.append("--schema")
-        if controls['enum_dump_check'].isChecked(): command.append("--dump")
-        if controls['enum_dump_all_check'].isChecked(): command.append("--dump-all")
-        if db := controls['db_edit'].text().strip(): command.extend(["-D", db])
-        if tbl := controls['tbl_edit'].text().strip(): command.extend(["-T", tbl])
-        if col := controls['col_edit'].text().strip(): command.extend(["-C", col])
+        if self._get_control_value(controls, 'enum_all_check', 'check'): command.append("-a")
+        if self._get_control_value(controls, 'enum_banner_check', 'check'): command.append("-b")
+        if self._get_control_value(controls, 'enum_current_user_check', 'check'): command.append("--current-user")
+        if self._get_control_value(controls, 'enum_current_db_check', 'check'): command.append("--current-db")
+        if self._get_control_value(controls, 'enum_is_dba_check', 'check'): command.append("--is-dba")
+        if self._get_control_value(controls, 'enum_passwords_check', 'check'): command.append("--passwords")
+        if self._get_control_value(controls, 'enum_dbs_check', 'check'): command.append("--dbs")
+        if self._get_control_value(controls, 'enum_tables_check', 'check'): command.append("--tables")
+        if self._get_control_value(controls, 'enum_columns_check', 'check'): command.append("--columns")
+        if self._get_control_value(controls, 'enum_schema_check', 'check'): command.append("--schema")
+        if self._get_control_value(controls, 'enum_dump_check', 'check'): command.append("--dump")
+        if self._get_control_value(controls, 'enum_dump_all_check', 'check'): command.append("--dump-all")
+
+        if db := self._get_control_value(controls, 'db_edit', 'text'):
+            if db.strip(): command.extend(["-D", db.strip()])
+        if tbl := self._get_control_value(controls, 'tbl_edit', 'text'):
+            if tbl.strip(): command.extend(["-T", tbl.strip()])
+        if col := self._get_control_value(controls, 'col_edit', 'text'):
+            if col.strip(): command.extend(["-C", col.strip()])
 
         # --- Access Tab ---
-        if controls['os_shell_check'].isChecked(): command.append("--os-shell")
-        if controls['sql_shell_check'].isChecked(): command.append("--sql-shell")
+        if self._get_control_value(controls, 'os_shell_check', 'check'): command.append("--os-shell")
+        if self._get_control_value(controls, 'sql_shell_check', 'check'): command.append("--sql-shell")
 
         # --- General Tab ---
-        if threads := controls['threads_edit'].text().strip(): command.extend(["--threads", threads])
-        if controls['batch_check'].isChecked(): command.append("--batch")
-        if controls['flush_session_check'].isChecked(): command.append("--flush-session")
+        if threads := self._get_control_value(controls, 'threads_edit', 'text'):
+            if threads.strip(): command.extend(["--threads", threads.strip()])
+        if self._get_control_value(controls, 'batch_check', 'check'): command.append("--batch")
+        if self._get_control_value(controls, 'flush_session_check', 'check'): command.append("--flush-session")
 
         # --- Default flags for GUI operation ---
         if "--batch" not in command:
             command.append("--batch")
         command.extend(["--answers", "quit=N"])
 
-
         # --- Additional Options ---
-        if extra_opts := controls['extra_opts_edit'].text().strip():
-            command.extend(extra_opts.split())
+        if extra_opts := self._get_control_value(controls, 'extra_opts_edit', 'text'):
+            if extra_opts.strip(): command.extend(extra_opts.strip().split())
+
+        return command, target_for_log, None
+
+    def start_sqlmap_scan(self):
+        """Starts the SQLMap scan worker thread."""
+        if self.is_tool_running:
+            QMessageBox.warning(self, "Busy", "Another tool is already running.")
+            return
+
+        controls = self.sqlmap_controls
+        command, target_for_log, error = self._build_sqlmap_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
+            return
+
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "SQLMap Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -5231,7 +5371,6 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.sqlmap_output_console.clear()
 
-        target_for_log = url if url else reqfile
         self.worker = WorkerThread(self._sqlmap_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
@@ -5305,7 +5444,7 @@ class Zurvan(QMainWindow):
         controls['hashfile_edit'].setToolTip("The file containing the hashes to crack.")
         hashfile_layout.addWidget(controls['hashfile_edit'])
         browse_hash_btn = QPushButton("Browse...")
-        browse_hash_btn.clicked.connect(self.browse_hashcat_hashfile)
+        browse_hash_btn.clicked.connect(lambda: self._browse_file_for_lineedit(controls['hashfile_edit'], "Select Hash File"))
         hashfile_layout.addWidget(browse_hash_btn)
         config_layout.addRow("Hash File:", hashfile_layout)
 
@@ -5336,7 +5475,7 @@ class Zurvan(QMainWindow):
         controls['outfile_edit'].setToolTip("The file to save cracked hashes to (-o).")
         outfile_layout.addWidget(controls['outfile_edit'])
         browse_out_btn = QPushButton("Browse...")
-        browse_out_btn.clicked.connect(self.browse_hashcat_outfile)
+        browse_out_btn.clicked.connect(lambda: self._browse_save_file_for_lineedit(controls['outfile_edit'], "Save Output File", "Text Files (*.txt);;All Files (*)"))
         outfile_layout.addWidget(browse_out_btn)
         config_layout.addRow("Output File (-o):", outfile_layout)
 
@@ -5349,7 +5488,7 @@ class Zurvan(QMainWindow):
         wordlist_layout.addWidget(controls['wordlist_list'])
         wordlist_buttons = QHBoxLayout()
         add_wordlist_btn = QPushButton("Add Wordlist(s)")
-        add_wordlist_btn.clicked.connect(self.browse_hashcat_wordlist)
+        add_wordlist_btn.clicked.connect(lambda: self._browse_files_for_listwidget(controls['wordlist_list'], "Select Wordlist(s)"))
         remove_wordlist_btn = QPushButton("Remove Selected")
         remove_wordlist_btn.clicked.connect(lambda: controls['wordlist_list'].takeItem(controls['wordlist_list'].currentRow()))
         wordlist_buttons.addWidget(add_wordlist_btn)
@@ -5418,93 +5557,74 @@ class Zurvan(QMainWindow):
 
         return widget
 
-    def browse_hashcat_hashfile(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Hash File", "", "All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "hashcat_output_console"):
-                 self.hashcat_controls['hashfile_edit'].setText(file_path)
+    def _build_hashcat_command(self, controls):
+        """Builds the Hashcat command list from a dictionary of controls or widgets."""
+        command = ["hashcat"]
+
+        # --- Config Tab ---
+        hashfile = self._get_control_value(controls, 'hashfile_edit', 'text')
+        if not hashfile or not hashfile.strip():
+            return None, None, "Hash file is required."
+        hashfile = hashfile.strip()
+        command.append(hashfile)
+        target_for_log = hashfile
+
+        hash_type = self._get_control_value(controls, 'type_edit', 'text')
+        if not hash_type or not hash_type.strip():
+            return None, None, "Hash mode (-m) is required."
+        command.extend(["-m", hash_type.strip()])
+
+        attack_mode_text = self._get_control_value(controls, 'attack_mode_combo', 'combo')
+        attack_mode = attack_mode_text.split(" ")[0] if attack_mode_text else "0"
+        command.extend(["-a", attack_mode])
+
+        if outfile := self._get_control_value(controls, 'outfile_edit', 'text'):
+            if outfile.strip(): command.extend(["-o", outfile.strip()])
+
+        # --- Wordlist/Mask Tabs ---
+        attack_mode_int = int(attack_mode)
+        if attack_mode_int in [0, 1, 6, 7]: # Modes that use wordlists
+            is_lab_run = not isinstance(controls.get('wordlist_list'), QWidget) if 'wordlist_list' in controls else True
+            if is_lab_run:
+                wordlists = controls.get('wordlist_list', [])
             else:
-                for tool_name, config_data in self.lab_tool_configs.items():
-                    if config_data['widget'].isVisible() and tool_name == "Hashcat":
-                        config_data['controls']['hashfile_edit'].setText(file_path)
-                        break
+                wordlist_widget = controls['wordlist_list']
+                wordlists = [wordlist_widget.item(i).text() for i in range(wordlist_widget.count())]
 
-    def browse_hashcat_wordlist(self):
-        file_paths, _ = QFileDialog.getOpenFileNames(self, "Select Wordlist(s)", "", "Text Files (*.txt);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if not file_paths:
-            return
+            if not wordlists:
+                return None, None, "This attack mode requires at least one wordlist."
+            command.extend(wordlists)
 
-        if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "hashcat_output_console"):
-            for path in file_paths: self.hashcat_controls['wordlist_list'].addItem(path)
-        else:
-            for tool_name, config_data in self.lab_tool_configs.items():
-                if config_data['widget'].isVisible() and tool_name == "Hashcat":
-                    for path in file_paths: config_data['controls']['wordlist_list'].addItem(path)
-                    break
+        if attack_mode_int in [3, 6, 7]: # Modes that use masks
+            mask = self._get_control_value(controls, 'mask_edit', 'text')
+            if not mask or not mask.strip():
+                return None, None, "This attack mode requires a mask."
+            command.append(mask.strip())
 
-    def browse_hashcat_outfile(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Output File", "", "Text Files (*.txt);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "hashcat_output_console"):
-                 self.hashcat_controls['outfile_edit'].setText(file_path)
-            else:
-                for tool_name, config_data in self.lab_tool_configs.items():
-                    if config_data['widget'].isVisible() and tool_name == "Hashcat":
-                        config_data['controls']['outfile_edit'].setText(file_path)
-                        break
+        # --- Advanced Tab ---
+        if self._get_control_value(controls, 'force_check', 'check'):
+            command.append("--force")
+        if extra_opts := self._get_control_value(controls, 'extra_opts_edit', 'text'):
+            if extra_opts.strip(): command.extend(extra_opts.strip().split())
+
+        return command, target_for_log, None
 
     def start_hashcat_scan(self):
         """Starts the Hashcat worker thread."""
-        controls = self.hashcat_controls
-        if not shutil.which("hashcat"):
-            QMessageBox.critical(self, "Hashcat Error", "'hashcat' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        command = ["hashcat"]
+        controls = self.hashcat_controls
+        command, target_for_log, error = self._build_hashcat_command(controls)
 
-        # --- Config Tab ---
-        hashfile = controls['hashfile_edit'].text().strip()
-        if not hashfile:
-            QMessageBox.critical(self, "Input Error", "Hash file is required.")
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
-        command.append(hashfile)
 
-        hash_type = controls['type_edit'].text().strip()
-        if not hash_type:
-            QMessageBox.critical(self, "Input Error", "Hash mode (-m) is required.")
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Hashcat Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
             return
-        command.extend(["-m", hash_type])
-
-        attack_mode = controls['attack_mode_combo'].currentText().split(" ")[0]
-        command.extend(["-a", attack_mode])
-
-        if outfile := controls['outfile_edit'].text().strip():
-            command.extend(["-o", outfile])
-
-        # --- Wordlist/Mask Tabs ---
-        if controls['wordlist_tab'].isEnabled():
-            wordlists = [controls['wordlist_list'].item(i).text() for i in range(controls['wordlist_list'].count())]
-            if not wordlists:
-                QMessageBox.critical(self, "Input Error", "This attack mode requires at least one wordlist.")
-                return
-            command.extend(wordlists)
-
-        if controls['mask_tab'].isEnabled():
-            mask = controls['mask_edit'].text().strip()
-            if not mask:
-                QMessageBox.critical(self, "Input Error", "This attack mode requires a mask.")
-                return
-            command.append(mask)
-
-        # --- Advanced Tab ---
-        if controls['force_check'].isChecked():
-            command.append("--force")
-        if extra_opts := controls['extra_opts_edit'].text().strip():
-            command.extend(extra_opts.split())
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -5512,7 +5632,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.hashcat_output_console.clear()
 
-        self.worker = WorkerThread(self._hashcat_thread, args=(command, hashfile))
+        self.worker = WorkerThread(self._hashcat_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -5678,51 +5798,63 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
-    def start_nuclei_scan(self):
-        """Starts the Nuclei scan worker thread."""
-        controls = self.nuclei_controls
-        if not shutil.which("nuclei"):
-            QMessageBox.critical(self, "Nuclei Error", "'nuclei' command not found. Please ensure it is installed and in your system's PATH.")
-            return
+    def _build_nuclei_command(self, controls):
+        """Builds the Nuclei command list from a dictionary of controls or widgets."""
+        command = ["nuclei"]
 
-        if self.is_tool_running:
-            QMessageBox.warning(self, "Busy", "Another tool is already running.")
-            return
-
-        target = controls['target_edit'].text().strip()
-        if not target:
-            QMessageBox.critical(self, "Input Error", "A target or target list is required.")
-            return
+        target = self._get_control_value(controls, 'target_edit', 'text')
+        if not target or not target.strip():
+            return None, None, "A target or target list is required."
+        target = target.strip()
+        target_for_log = target
 
         # Determine if target is a file or a URL
-        command = ["nuclei"]
         if os.path.exists(target):
             command.extend(["-l", target])
         else:
             command.extend(["-u", target])
 
-        if templates := controls['templates_edit'].text().strip():
-            command.extend(["-t", templates])
+        if templates := self._get_control_value(controls, 'templates_edit', 'text'):
+            if templates.strip(): command.extend(["-t", templates.strip()])
 
-        if (severity := controls['severity_combo'].currentText()) != "all":
-            command.extend(["-s", severity])
+        if (severity := self._get_control_value(controls, 'severity_combo', 'combo')) != "all":
+            if severity: command.extend(["-s", severity])
 
-        if tags := controls['tags_edit'].text().strip():
-            command.extend(["-tags", tags])
+        if tags := self._get_control_value(controls, 'tags_edit', 'text'):
+            if tags.strip(): command.extend(["-tags", tags.strip()])
 
-        if output_file := controls['output_edit'].text().strip():
-            command.extend(["-o", output_file])
+        if output_file := self._get_control_value(controls, 'output_edit', 'text'):
+            if output_file.strip(): command.extend(["-o", output_file.strip()])
 
-        if concurrency := controls['concurrency_edit'].text().strip():
-            command.extend(["-c", concurrency])
+        if concurrency := self._get_control_value(controls, 'concurrency_edit', 'text'):
+            if concurrency.strip(): command.extend(["-c", concurrency.strip()])
 
-        if ratelimit := controls['ratelimit_edit'].text().strip():
-            command.extend(["-rl", ratelimit])
+        if ratelimit := self._get_control_value(controls, 'ratelimit_edit', 'text'):
+            if ratelimit.strip(): command.extend(["-rl", ratelimit.strip()])
 
-        if controls['verbose_check'].isChecked():
+        if self._get_control_value(controls, 'verbose_check', 'check'):
             command.append("-v")
 
         command.extend(["-nC", "-json"]) # Always disable color and enable JSON for parsing
+
+        return command, target_for_log, None
+
+    def start_nuclei_scan(self):
+        """Starts the Nuclei scan worker thread."""
+        if self.is_tool_running:
+            QMessageBox.warning(self, "Busy", "Another tool is already running.")
+            return
+
+        controls = self.nuclei_controls
+        command, target_for_log, error = self._build_nuclei_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
+            return
+
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Nuclei Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -5730,7 +5862,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.nuclei_output_console.clear()
 
-        self.worker = WorkerThread(self._nuclei_thread, args=(command, target))
+        self.worker = WorkerThread(self._nuclei_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -5876,39 +6008,62 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
+    def _browse_files_for_listwidget(self, list_widget, dialog_title):
+        file_paths, _ = QFileDialog.getOpenFileNames(self, dialog_title, "", "Text Files (*.txt);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
+        if file_paths:
+            list_widget.addItems(file_paths)
+
     def _browse_dir_for_lineedit(self, line_edit_widget, dialog_title):
         dir_path = QFileDialog.getExistingDirectory(self, dialog_title, options=QFileDialog.Option.DontUseNativeDialog)
         if dir_path:
             line_edit_widget.setText(dir_path)
 
+    def _build_trufflehog_command(self, controls):
+        """Builds the TruffleHog command list from a dictionary of controls or widgets."""
+        command = ["trufflehog"]
+
+        target = self._get_control_value(controls, 'target_edit', 'text')
+        if not target or not target.strip():
+            return None, None, "A target is required."
+        target = target.strip()
+        target_for_log = target
+
+        source_type = ""
+        if self._get_control_value(controls, 'git_rb', 'check'):
+            source_type = "git"
+        elif self._get_control_value(controls, 'github_rb', 'check'):
+            source_type = "github"
+        elif self._get_control_value(controls, 'filesystem_rb', 'check'):
+            source_type = "filesystem"
+
+        if not source_type:
+             return None, None, "A source type (Git, GitHub, Filesystem) must be selected."
+
+        command.extend([source_type, target])
+
+        if self._get_control_value(controls, 'only_verified_check', 'check'):
+            command.append("--only-verified")
+
+        command.append("--json") # Always add --json for parsing
+
+        return command, target_for_log, None
+
     def start_trufflehog_scan(self):
         """Starts the TruffleHog scan worker thread."""
-        controls = self.trufflehog_controls
-        if not shutil.which("trufflehog"):
-            QMessageBox.critical(self, "TruffleHog Error", "'trufflehog' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        target = controls['target_edit'].text().strip()
-        if not target:
-            QMessageBox.critical(self, "Input Error", "A target is required.")
+        controls = self.trufflehog_controls
+        command, target_for_log, error = self._build_trufflehog_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        source_type = ""
-        if controls['git_rb'].isChecked(): source_type = "git"
-        elif controls['github_rb'].isChecked(): source_type = "github"
-        elif controls['filesystem_rb'].isChecked(): source_type = "filesystem"
-
-        command = ["trufflehog", source_type, target]
-
-        if controls['only_verified_check'].isChecked():
-            command.append("--only-verified")
-
-        # Always add --json for parsing, but hide the checkbox from the user to avoid confusion
-        command.append("--json")
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "TruffleHog Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -5916,7 +6071,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.trufflehog_output_console.clear()
 
-        self.worker = WorkerThread(self._trufflehog_thread, args=(command, target))
+        self.worker = WorkerThread(self._trufflehog_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -6049,38 +6204,50 @@ class Zurvan(QMainWindow):
         """Shows already cracked passwords."""
         self._start_jtr_generic(crack_mode=False)
 
-    def _start_jtr_generic(self, crack_mode):
-        controls = self.jtr_controls
-        if not shutil.which("john"):
-            QMessageBox.critical(self, "JTR Error", "'john' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
-        if self.is_tool_running:
-            QMessageBox.warning(self, "Busy", "Another tool is already running.")
-            return
-
-        hash_file = controls['hash_file_edit'].text().strip()
-        if not hash_file:
-            QMessageBox.critical(self, "Input Error", "A hash file is required.")
-            return
-
+    def _build_jtr_command(self, controls, crack_mode):
+        """Builds the John the Ripper command list from a dictionary of controls or widgets."""
         command = ["john"]
 
+        hash_file = self._get_control_value(controls, 'hash_file_edit', 'text')
+        if not hash_file or not hash_file.strip():
+            return None, None, "A hash file is required."
+        hash_file = hash_file.strip()
+        target_for_log = hash_file
+
         if crack_mode:
-            wordlist = controls['wordlist_edit'].text().strip()
-            if wordlist:
-                command.extend([f"--wordlist={wordlist}"])
-                if controls['rules_check'].isChecked():
+            wordlist = self._get_control_value(controls, 'wordlist_edit', 'text')
+            if wordlist and wordlist.strip():
+                command.extend([f"--wordlist={wordlist.strip()}"])
+                if self._get_control_value(controls, 'rules_check', 'check'):
                     command.append("--rules")
-            if controls['incremental_check'].isChecked():
+            if self._get_control_value(controls, 'incremental_check', 'check'):
                 command.append("--incremental")
         else: # Show mode
             command.append("--show")
 
-        if format_type := controls['format_edit'].text().strip():
-            command.extend([f"--format={format_type}"])
+        if format_type := self._get_control_value(controls, 'format_edit', 'text'):
+            if format_type.strip():
+                command.extend([f"--format={format_type.strip()}"])
 
         command.append(hash_file)
+
+        return command, target_for_log, None
+
+    def _start_jtr_generic(self, crack_mode):
+        if self.is_tool_running:
+            QMessageBox.warning(self, "Busy", "Another tool is already running.")
+            return
+
+        controls = self.jtr_controls
+        command, target_for_log, error = self._build_jtr_command(controls, crack_mode)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
+            return
+
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "JTR Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -6089,7 +6256,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.jtr_output_console.clear()
 
-        self.worker = WorkerThread(self._jtr_thread, args=(command, hash_file))
+        self.worker = WorkerThread(self._jtr_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -6211,45 +6378,62 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
+    def _build_hydra_command(self, controls):
+        """Builds the Hydra command list from a dictionary of controls or widgets."""
+        command = ["hydra"]
+
+        target = self._get_control_value(controls, 'target_edit', 'text')
+        service = self._get_control_value(controls, 'service_edit', 'text')
+
+        if not target or not target.strip() or not service or not service.strip():
+            return None, None, "Target and Service are required."
+
+        target = target.strip()
+        service = service.strip()
+        target_for_log = f"{service}://{target}"
+
+        user = self._get_control_value(controls, 'user_edit', 'text')
+        user_list = self._get_control_value(controls, 'user_list_edit', 'text')
+        if user and user.strip():
+            command.extend(["-l", user.strip()])
+        elif user_list and user_list.strip():
+            command.extend(["-L", user_list.strip()])
+        else:
+            return None, None, "A username or user list is required."
+
+        pwd = self._get_control_value(controls, 'pass_edit', 'text')
+        pass_list = self._get_control_value(controls, 'pass_list_edit', 'text')
+        if pwd: # Do not strip password
+            command.extend(["-p", pwd])
+        elif pass_list and pass_list.strip():
+            command.extend(["-P", pass_list.strip()])
+        else:
+            return None, None, "A password or password list is required."
+
+        if tasks := self._get_control_value(controls, 'tasks_edit', 'text'):
+            if tasks.strip():
+                command.extend(["-t", tasks.strip()])
+
+        command.append(target_for_log)
+
+        return command, target_for_log, None
+
     def start_hydra_attack(self):
         """Starts the Hydra attack worker thread."""
-        controls = self.hydra_controls
-        if not shutil.which("hydra"):
-            QMessageBox.critical(self, "Hydra Error", "'hydra' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        target = controls['target_edit'].text().strip()
-        service = controls['service_edit'].text().strip()
-        if not target or not service:
-            QMessageBox.critical(self, "Input Error", "Target and Service are required.")
+        controls = self.hydra_controls
+        command, target_for_log, error = self._build_hydra_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["hydra"]
-
-        if user := controls['user_edit'].text().strip():
-            command.extend(["-l", user])
-        elif user_list := controls['user_list_edit'].text().strip():
-            command.extend(["-L", user_list])
-        else:
-            QMessageBox.critical(self, "Input Error", "A username or user list is required.")
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Hydra Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
             return
-
-        if pwd := controls['pass_edit'].text().strip():
-            command.extend(["-p", pwd])
-        elif pass_list := controls['pass_list_edit'].text().strip():
-            command.extend(["-P", pass_list])
-        else:
-            QMessageBox.critical(self, "Input Error", "A password or password list is required.")
-            return
-
-        if tasks := controls['tasks_edit'].text().strip():
-            command.extend(["-t", tasks])
-
-        command.append(f"{service}://{target}")
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -6257,8 +6441,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.hydra_output_console.clear()
 
-        target_str = f"{service}://{target}"
-        self.worker = WorkerThread(self._hydra_thread, args=(command, target_str))
+        self.worker = WorkerThread(self._hydra_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -6363,38 +6546,53 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
+    def _build_sherlock_command(self, controls):
+        """Builds the Sherlock command list from a dictionary of controls or widgets."""
+        command = ["sherlock", "--no-color"]
+
+        usernames = self._get_control_value(controls, 'usernames_edit', 'text')
+        if not usernames or not usernames.strip():
+            return None, None, "At least one username is required."
+        target_for_log = usernames.strip()
+
+        if timeout := self._get_control_value(controls, 'timeout_edit', 'text'):
+            if timeout.strip():
+                command.extend(["--timeout", timeout.strip()])
+
+        # This is for the user-specified output file.
+        if output_file := self._get_control_value(controls, 'output_edit', 'text'):
+             if output_file.strip():
+                command.extend(["-o", output_file.strip()])
+
+        command.extend(target_for_log.split())
+
+        return command, target_for_log, None
+
     def start_sherlock_scan(self):
         """Starts the Sherlock scan worker thread."""
-        controls = self.sherlock_controls
-        if not shutil.which("sherlock"):
-            QMessageBox.critical(self, "Sherlock Error", "'sherlock' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        usernames = controls['usernames_edit'].text().strip()
-        if not usernames:
-            QMessageBox.critical(self, "Input Error", "At least one username is required.")
+        controls = self.sherlock_controls
+        command, target_for_log, error = self._build_sherlock_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["sherlock", "--no-color"]
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Sherlock Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
-        if timeout := controls['timeout_edit'].text().strip():
-            command.extend(["--timeout", timeout])
-
+        # Create a temporary directory for sherlock to save its files for parsing
         try:
-            # Create a temporary directory for sherlock to save its files
             self.sherlock_temp_dir = tempfile.mkdtemp()
-            # Sherlock saves as <username>.csv in the specified folder
-            # We don't know the exact filename beforehand if multiple users are scanned
+            # The command is modified to include the temp folder for CSV output
             command.extend(["-fo", self.sherlock_temp_dir, "--csv"])
         except Exception as e:
             QMessageBox.critical(self, "File Error", f"Could not create temporary directory for Sherlock report: {e}")
             return
-
-        command.extend(usernames.split())
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -6402,7 +6600,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.sherlock_output_console.clear()
 
-        self.worker = WorkerThread(self._sherlock_thread, args=(command, usernames))
+        self.worker = WorkerThread(self._sherlock_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -6519,32 +6717,47 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
+    def _build_spiderfoot_command(self, controls):
+        """Builds the Spiderfoot command list from a dictionary of controls or widgets."""
+        command = ["spiderfoot-cli"]
+
+        target = self._get_control_value(controls, 'target_edit', 'text')
+        if not target or not target.strip():
+            return None, None, "A target is required."
+        target = target.strip()
+        target_for_log = target
+
+        command.extend(["-s", target])
+
+        if types := self._get_control_value(controls, 'types_edit', 'text'):
+            if types.strip():
+                command.extend(["-t", types.strip()])
+        if modules := self._get_control_value(controls, 'modules_edit', 'text'):
+            if modules.strip():
+                command.extend(["-m", modules.strip()])
+        if self._get_control_value(controls, 'silent_check', 'check'):
+            command.append("-q")
+
+        command.append("-n") # Disable history logging for non-interactive use
+
+        return command, target_for_log, None
+
     def start_spiderfoot_scan(self):
         """Starts the Spiderfoot scan worker thread."""
-        controls = self.spiderfoot_controls
-        if not shutil.which("spiderfoot-cli"):
-            QMessageBox.critical(self, "Spiderfoot Error", "'spiderfoot-cli' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        target = controls['target_edit'].text().strip()
-        if not target:
-            QMessageBox.critical(self, "Input Error", "A target is required.")
+        controls = self.spiderfoot_controls
+        command, target_for_log, error = self._build_spiderfoot_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["spiderfoot-cli", "-s", target]
-
-        if types := controls['types_edit'].text().strip():
-            command.extend(["-t", types])
-        if modules := controls['modules_edit'].text().strip():
-            command.extend(["-m", modules])
-        if controls['silent_check'].isChecked():
-            command.append("-q")
-
-        command.append("-n") # Disable history logging for non-interactive use
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Spiderfoot Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         self.is_tool_running = True
         controls['start_btn'].setEnabled(False)
@@ -6552,7 +6765,7 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.spiderfoot_output_console.clear()
 
-        self.worker = WorkerThread(self._spiderfoot_thread, args=(command, target))
+        self.worker = WorkerThread(self._spiderfoot_thread, args=(command, target_for_log))
         self.active_threads.append(self.worker)
         self.worker.start()
 
@@ -6628,7 +6841,7 @@ class Zurvan(QMainWindow):
         controls['outfile_edit'].setPlaceholderText("Optional: path to save report...")
         outfile_layout.addWidget(controls['outfile_edit'])
         browse_out_btn = QPushButton("Browse...")
-        browse_out_btn.clicked.connect(self.browse_masscan_outfile)
+        browse_out_btn.clicked.connect(lambda: self._browse_save_file_for_lineedit(controls['outfile_edit'], "Save Masscan Report", "JSON files (*.json);;All Files (*)"))
         outfile_layout.addWidget(browse_out_btn)
         controls_layout.addRow("Output File (-oJ):", outfile_layout)
 
@@ -6677,18 +6890,6 @@ class Zurvan(QMainWindow):
         self.masscan_controls['stop_btn'].clicked.connect(self.cancel_tool)
 
         return widget
-
-    def browse_masscan_outfile(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Masscan Report", "", "JSON files (*.json);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            # This needs to work for both the main tab and the LAB tab instance
-            if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "masscan_output_console"):
-                 self.masscan_controls['outfile_edit'].setText(file_path)
-            else: # We are in the LAB tab, find the active config widget
-                for tool_name, config_data in self.lab_tool_configs.items():
-                    if config_data['widget'].isVisible():
-                        config_data['controls']['outfile_edit'].setText(file_path)
-                        break
 
     def start_masscan_scan(self, sudo_password=None):
         """Starts the Masscan worker thread, prompting for sudo if necessary."""
@@ -6780,44 +6981,6 @@ class Zurvan(QMainWindow):
             with self.thread_finish_lock:
                 self.masscan_process = None
             logging.info("Masscan scan thread finished.")
-
-    def _whatweb_thread(self, command):
-        """Worker thread for running the whatweb command."""
-        q = self.tool_results_queue
-        logging.info(f"Starting WhatWeb with command: {' '.join(command)}")
-        q.put(('whatweb_output', f"$ {' '.join(command)}\n\n"))
-
-        try:
-            startupinfo = None
-            if sys.platform == "win32":
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, startupinfo=startupinfo, encoding='utf-8', errors='replace')
-
-            with self.thread_finish_lock:
-                self.whatweb_process = process
-
-            for line in iter(process.stdout.readline, ''):
-                if self.tool_stop_event.is_set():
-                    process.terminate()
-                    q.put(('whatweb_output', "\n\n--- Scan Canceled By User ---\n"))
-                    break
-                q.put(('whatweb_output', line))
-
-            process.stdout.close()
-            process.wait()
-
-        except FileNotFoundError:
-            q.put(('error', 'WhatWeb Error', "'whatweb' command not found. Please ensure it is installed and in your system's PATH."))
-        except Exception as e:
-            logging.error(f"WhatWeb thread error: {e}", exc_info=True)
-            q.put(('error', 'WhatWeb Error', str(e)))
-        finally:
-            q.put(('tool_finished', 'whatweb_scan', " ".join(command[1:]), "".join(full_output)))
-            with self.thread_finish_lock:
-                self.whatweb_process = None
-            logging.info("WhatWeb scan thread finished.")
 
     def _gobuster_thread(self, command, url):
         """Worker thread for running the gobuster command."""
@@ -7818,37 +7981,48 @@ class Zurvan(QMainWindow):
 
         return widget
 
+    def _build_wifite_command(self, controls):
+        """Builds the Wifite command list from a dictionary of controls or widgets."""
+        iface = self.get_selected_iface()
+        if not iface:
+            return None, None, "A monitor-mode wireless interface must be selected."
+
+        command = ["wifite", "-i", iface]
+
+        essid = self._get_control_value(controls, 'essid_edit', 'text')
+        if essid and essid.strip():
+            command.extend(["--essid", essid.strip()])
+
+        target_for_log = essid.strip() if essid and essid.strip() else f"all on {iface}"
+
+        if self._get_control_value(controls, 'wps_check', 'check'):
+            command.append("--wps")
+        if self._get_control_value(controls, 'pmkid_check', 'check'):
+            command.append("--pmkid")
+        if self._get_control_value(controls, 'kill_check', 'check'):
+            command.append("--kill")
+
+        return command, target_for_log, None
+
     def start_wifite_scan(self, sudo_password=None):
         """Starts the Wifite scan worker thread, prompting for sudo if necessary."""
-        controls = self.wifite_controls
-        if not shutil.which("wifite"):
-            QMessageBox.critical(self, "Wifite Error", "'wifite' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
         if self.is_tool_running and not sudo_password:
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        iface = self.get_selected_iface()
-        if not iface:
-            QMessageBox.warning(self, "Interface Error", "Please select a monitor-mode wireless interface.")
+        controls = self.wifite_controls
+        command, target_for_log, error = self._build_wifite_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
             return
 
-        command = ["wifite", "-i", iface]
-        essid = controls['essid_edit'].text().strip()
-        if essid:
-            command.extend(["--essid", essid])
-
-        if controls['wps_check'].isChecked():
-            command.append("--wps")
-        if controls['pmkid_check'].isChecked():
-            command.append("--pmkid")
-        if controls['kill_check'].isChecked():
-            command.append("--kill")
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "Wifite Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         # Wifite always needs root on non-Windows systems.
         if not sudo_password and sys.platform != "win32":
-            # Add a specific check to the sudo prompter to re-enable the right buttons on cancel
             if 'wifite_scan' not in self.sudo_cancel_handlers:
                 self.sudo_cancel_handlers['wifite_scan'] = lambda: (
                     controls['start_btn'].setEnabled(True),
@@ -7863,7 +8037,6 @@ class Zurvan(QMainWindow):
         self.tool_stop_event.clear()
         self.wifite_output_console.clear()
 
-        target_for_log = essid or f"all on {iface}"
         self.worker = WorkerThread(self._execute_command_thread, args=(
             command, 'wifite_scan', target_for_log, self.wifite_output_console, sudo_password
         ))
@@ -7945,7 +8118,7 @@ class Zurvan(QMainWindow):
         pcap_layout.addWidget(self.wpa_pcap_edit)
         pcap_browse_btn = QPushButton("Browse...")
         pcap_browse_btn.setToolTip("Browse for a .pcap file containing a WPA handshake.")
-        pcap_browse_btn.clicked.connect(self.browse_for_pcap)
+        pcap_browse_btn.clicked.connect(lambda: self._browse_file_for_lineedit(self.wpa_pcap_edit, "Select Handshake File", "Pcap Files (*.pcap *.pcapng);;All Files (*)"))
         pcap_layout.addWidget(pcap_browse_btn)
         cracker_layout.addLayout(pcap_layout)
 
@@ -7956,7 +8129,7 @@ class Zurvan(QMainWindow):
         wordlist_layout.addWidget(self.wpa_wordlist_edit)
         wordlist_browse_btn = QPushButton("Browse...")
         wordlist_browse_btn.setToolTip("Browse for a wordlist file (.txt).")
-        wordlist_browse_btn.clicked.connect(self.browse_for_wordlist)
+        wordlist_browse_btn.clicked.connect(lambda: self._browse_file_for_lineedit(self.wpa_wordlist_edit, "Select Wordlist File", "Text Files (*.txt);;All Files (*)"))
         wordlist_layout.addWidget(wordlist_browse_btn)
         crunch_btn = QPushButton("Generate...")
         crunch_btn.setToolTip("Generate a custom wordlist using Crunch (must be installed).")
@@ -7994,35 +8167,15 @@ class Zurvan(QMainWindow):
             ssid = info[0]
             self.wpa_target_combo.addItem(f"{ssid} ({bssid})", bssid)
 
-    def _browse_file_for_lineedit(self, line_edit_widget, dialog_title):
-        file_path, _ = QFileDialog.getOpenFileName(self, dialog_title, "", "All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
+    def _browse_save_file_for_lineedit(self, line_edit_widget, dialog_title, filter="All Files (*)"):
+        file_path, _ = QFileDialog.getSaveFileName(self, dialog_title, "", filter, options=QFileDialog.Option.DontUseNativeDialog)
         if file_path:
             line_edit_widget.setText(file_path)
 
-    def _browse_save_file_for_lineedit(self, line_edit_widget, dialog_title):
-        file_path, _ = QFileDialog.getSaveFileName(self, dialog_title, "", "All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
+    def _browse_file_for_lineedit(self, line_edit_widget, dialog_title, filter="All Files (*)"):
+        file_path, _ = QFileDialog.getOpenFileName(self, dialog_title, "", filter, options=QFileDialog.Option.DontUseNativeDialog)
         if file_path:
             line_edit_widget.setText(file_path)
-
-    def browse_for_pcap(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Handshake File", "", "Pcap Files (*.pcap *.pcapng);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            self.wpa_pcap_edit.setText(file_path)
-
-    def browse_for_wordlist(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Wordlist File", "", "Text Files (*.txt);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            self.wpa_wordlist_edit.setText(file_path)
-
-    def browse_nikto_output(self):
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Nikto Report", "", "HTML Files (*.html);;CSV Files (*.csv);;Text Files (*.txt);;XML Files (*.xml);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        if file_path:
-            self.nikto_output_file_edit.setText(file_path)
-
-    def browse_nikto_save_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Directory to Save Responses", options=QFileDialog.Option.DontUseNativeDialog)
-        if dir_path:
-            self.nikto_save_dir_edit.setText(dir_path)
 
     def start_wpa_crack(self):
         if self.aircrack_thread and self.aircrack_thread.isRunning():
@@ -8616,6 +8769,18 @@ class Zurvan(QMainWindow):
         """
         q = self.tool_results_queue
 
+        # --- Temp File Handling ---
+        temp_file_path = None
+        if tool_name == 'nmap_scan':
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".xml", encoding='utf-8') as tmp:
+                    temp_file_path = tmp.name
+                command.extend(["-oX", temp_file_path])
+            except Exception as e:
+                q.put(('error', 'File Error', f"Could not create temporary file for Nmap report: {e}"))
+                q.put(('tool_finished', tool_name, target, "Error creating temp file"))
+                return
+
         # Check if Tor proxy is enabled and wrap the command if necessary
         # This is done before the sudo check so the final command is `sudo proxychains-ng ...`
         is_tor_enabled = self.tor_proxy_check.isChecked()
@@ -8666,13 +8831,12 @@ class Zurvan(QMainWindow):
 
             # Special handling for tools that produce structured output
             if not self.tool_stop_event.is_set():
-                if tool_name == 'nmap_scan' and hasattr(self, 'nmap_xml_temp_file') and self.nmap_xml_temp_file and os.path.exists(self.nmap_xml_temp_file):
-                     with open(self.nmap_xml_temp_file, 'r', encoding='utf-8') as f:
+                if tool_name == 'nmap_scan' and temp_file_path and os.path.exists(temp_file_path):
+                    with open(temp_file_path, 'r', encoding='utf-8') as f:
                         xml_content = f.read()
-                     if xml_content:
+                    if xml_content:
                         q.put(('nmap_xml_result', xml_content))
-                     os.remove(self.nmap_xml_temp_file)
-                     self.nmap_xml_temp_file = None
+                    os.remove(temp_file_path)
                 elif tool_name == 'dirsearch_scan' and hasattr(self, 'dirsearch_json_temp_file') and self.dirsearch_json_temp_file and os.path.exists(self.dirsearch_json_temp_file):
                     with open(self.dirsearch_json_temp_file, 'r', encoding='utf-8') as f:
                         json_data = f.read()
@@ -8984,17 +9148,8 @@ class Zurvan(QMainWindow):
 
         return widget, controls
 
-    def start_arp_scan_cli(self, sudo_password=None):
-        """Starts the arp-scan CLI worker thread, prompting for sudo if necessary."""
-        controls = self.arp_scan_cli_controls
-        if not shutil.which("arp-scan"):
-            QMessageBox.critical(self, "arp-scan Error", "'arp-scan' command not found. Please ensure it is installed and in your system's PATH.")
-            return
-
-        if self.is_tool_running and not sudo_password:
-            QMessageBox.warning(self, "Busy", "Another tool is already running.")
-            return
-
+    def _build_arp_scan_cli_command(self, controls):
+        """Builds the arp-scan CLI command list from a dictionary of controls or widgets."""
         command = ["arp-scan"]
 
         iface = self.get_selected_iface()
@@ -9002,18 +9157,36 @@ class Zurvan(QMainWindow):
             command.extend(["--interface", iface])
 
         target_for_log = "--localnet"
-        if controls['localnet_check'].isChecked():
+        if self._get_control_value(controls, 'localnet_check', 'check'):
             command.append("--localnet")
         else:
-            target = controls['target_edit'].text().strip()
-            if not target:
-                QMessageBox.critical(self, "Input Error", "A custom target is required if --localnet is not checked.")
-                return
-            command.append(target)
-            target_for_log = target
+            target = self._get_control_value(controls, 'target_edit', 'text')
+            if not target or not target.strip():
+                return None, None, "A custom target is required if --localnet is not checked."
+            command.append(target.strip())
+            target_for_log = target.strip()
 
-        if controls['verbose_check'].isChecked():
+        if self._get_control_value(controls, 'verbose_check', 'check'):
             command.append("--verbose")
+
+        return command, target_for_log, None
+
+    def start_arp_scan_cli(self, sudo_password=None):
+        """Starts the arp-scan CLI worker thread, prompting for sudo if necessary."""
+        if self.is_tool_running and not sudo_password:
+            QMessageBox.warning(self, "Busy", "Another tool is already running.")
+            return
+
+        controls = self.arp_scan_cli_controls
+        command, target_for_log, error = self._build_arp_scan_cli_command(controls)
+
+        if error:
+            QMessageBox.critical(self, "Input Error", error)
+            return
+
+        if not shutil.which(command[0]):
+            QMessageBox.critical(self, "arp-scan Error", f"'{command[0]}' command not found. Please ensure it is installed and in your system's PATH.")
+            return
 
         # arp-scan always needs root on non-Windows systems.
         if not sudo_password and sys.platform != "win32":
@@ -11627,28 +11800,452 @@ Key recommendations include immediately patching the vulnerable web server, corr
         self.active_threads.append(self.worker)
         self.worker.start()
 
+    def _execute_blocking_command_for_lab(self, command, tool_name):
+        """
+        Executes a command in a blocking manner for the LAB thread,
+        streaming its output to the queue. Returns (success, full_output).
+        """
+        q = self.tool_results_queue
+        full_output = []
+
+        logging.info(f"[LAB] Executing: {' '.join(command)}")
+        q.put(('lab_output', f"\n\n$ {' '.join(command)}\n"))
+
+        try:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                     text=True, bufsize=1, encoding='utf-8', errors='replace')
+
+            for line in iter(process.stdout.readline, ''):
+                if self.tool_stop_event.is_set():
+                    process.terminate()
+                    q.put(('lab_output', "\n--- Step Canceled By User ---\n"))
+                    return False, "".join(full_output)
+
+                q.put(('lab_output', line))
+                full_output.append(line)
+
+            process.stdout.close()
+            retcode = process.wait()
+
+            if retcode != 0:
+                logging.warning(f"[LAB] {tool_name} exited with non-zero code: {retcode}")
+
+            return True, "".join(full_output)
+
+        except FileNotFoundError:
+            q.put(('error', f'{tool_name} Error', f"Command '{command[0]}' not found."))
+            return False, ""
+        except Exception as e:
+            q.put(('error', f'{tool_name} Error', str(e)))
+            return False, ""
+
     def _lab_chain_thread(self, chain):
-        """Worker thread that executes each step of the LAB chain."""
+        """Worker thread that executes each step of the LAB chain sequentially."""
         q = self.tool_results_queue
         logging.info(f"LAB chain execution started with {len(chain)} steps.")
-        lab_context = {} # This dictionary will hold results passed between steps
+        self.lab_context = {} # This dictionary will hold results passed between steps
 
         for i, step in enumerate(chain):
             if self.tool_stop_event.is_set():
                 logging.info("LAB chain execution cancelled by user.")
+                q.put(('lab_status', "Chain cancelled by user."))
                 break
 
             tool_name = step['tool_name']
             config = step['config']
             q.put(('lab_status', f"Executing Step {i+1}/{len(chain)}: {tool_name}"))
 
-            # This is where the magic happens.
-            # For now, just log the config.
-            logging.info(f"--- Running LAB Step {i+1}: {tool_name} ---")
-            logging.info(f"Config: {json.dumps(config, indent=2)}")
+            # --- Nmap Scan Execution ---
+            if tool_name == "Nmap Scan":
+                target = config.get('target_edit', '')
+                if not target:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Nmap): Target is missing in configuration."))
+                    continue
 
-            # Placeholder for actual execution
-            time.sleep(2) # Simulate work
+                command = self._build_nmap_command(config, target)
+
+                # Nmap requires a temp file for XML output
+                temp_xml_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".xml", encoding='utf-8') as tmp_xml:
+                        temp_xml_path = tmp_xml.name
+                    command.extend(["-oX", temp_xml_path])
+                except Exception as e:
+                    q.put(('error', 'LAB File Error', f"Step {i+1} (Nmap): Could not create temp file: {e}"))
+                    continue
+
+                # Execute the command and handle output
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success:
+                    try:
+                        with open(temp_xml_path, 'r', encoding='utf-8') as f:
+                            xml_content = f.read()
+                        # Store result in context for next steps
+                        self.lab_context['last_nmap_xml'] = xml_content
+                        q.put(('lab_status', f"Nmap scan complete. XML results stored in context."))
+                    except Exception as e:
+                        q.put(('error', 'LAB File Error', f"Step {i+1} (Nmap): Could not read temp file: {e}"))
+                    finally:
+                        if temp_xml_path and os.path.exists(temp_xml_path):
+                            os.remove(temp_xml_path)
+                else:
+                     q.put(('lab_status', f"Step {i+1} (Nmap) failed or was cancelled."))
+
+            elif tool_name == "Subdomain Scanner (Sublist3r)":
+                command, target, error = self._build_sublist3r_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Sublist3r): {error}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success and output:
+                    # Parse and store results in context
+                    subdomains = re.findall(r'^[a-zA-Z0-9.\-]+\.' + re.escape(target), output, re.MULTILINE)
+                    unique_subdomains = sorted(list(set(subdomains)))
+                    if 'subdomains' not in self.lab_context:
+                        self.lab_context['subdomains'] = []
+                    self.lab_context['subdomains'].extend(unique_subdomains)
+                    self.lab_context['subdomains'] = sorted(list(set(self.lab_context['subdomains'])))
+                    q.put(('lab_status', f"Sublist3r found {len(unique_subdomains)} new subdomains. Total unique: {len(self.lab_context['subdomains'])}."))
+                else:
+                    q.put(('lab_status', f"Step {i+1} (Sublist3r) returned no output or failed."))
+            elif tool_name == "Subdomain Scanner (Subfinder)":
+                command, target, error = self._build_subfinder_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Subfinder): {error}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success and output:
+                    subdomains = [line for line in output.splitlines() if target in line and ' ' not in line and not line.startswith('$')]
+                    unique_subdomains = sorted(list(set(subdomains)))
+
+                    if 'subdomains' not in self.lab_context:
+                        self.lab_context['subdomains'] = []
+                    self.lab_context['subdomains'].extend(unique_subdomains)
+                    self.lab_context['subdomains'] = sorted(list(set(self.lab_context['subdomains'])))
+                    q.put(('lab_status', f"Subfinder found {len(unique_subdomains)} new subdomains. Total unique: {len(self.lab_context['subdomains'])}."))
+                else:
+                    q.put(('lab_status', f"Step {i+1} (Subfinder) returned no output or failed."))
+            elif tool_name == "httpx Probe":
+                # httpx can take a file as input. We can create one from the context.
+                target_list_from_config = config.get('target_list_edit', '').strip()
+
+                # Prioritize a file from config, otherwise use context
+                if not target_list_from_config and 'subdomains' in self.lab_context:
+                    try:
+                        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".txt", encoding='utf-8') as tmp_file:
+                            tmp_file.write("\n".join(self.lab_context['subdomains']))
+                            target_list_from_config = tmp_file.name
+                        q.put(('lab_status', f"Created temporary target list for httpx from {len(self.lab_context['subdomains'])} subdomains."))
+                        # Update the config for the build command
+                        config['target_list_edit'] = target_list_from_config
+                    except Exception as e:
+                        q.put(('error', 'LAB File Error', f"Step {i+1} (httpx): Could not create temp file: {e}"))
+                        continue
+
+                command, target, error = self._build_httpx_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (httpx): {error}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                # Clean up temp file if we created one
+                if target_list_from_config and target_list_from_config.startswith(tempfile.gettempdir()):
+                    os.remove(target_list_from_config)
+
+                if success and output:
+                    # In a real scenario, we might parse the JSON and add live hosts to a new context variable
+                    q.put(('lab_status', f"httpx probe finished."))
+                else:
+                    q.put(('lab_status', f"Step {i+1} (httpx) returned no output or failed."))
+
+            elif tool_name == "RustScan":
+                command, target, error = self._build_rustscan_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (RustScan): {error}"))
+                    continue
+
+                # RustScan may require sudo, which must be handled by running the entire app with sudo.
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success and output:
+                    # TODO: Parse output for open ports and add to context
+                    q.put(('lab_status', f"RustScan finished against {target}."))
+                else:
+                    q.put(('lab_status', f"Step {i+1} (RustScan) returned no output or failed."))
+            elif tool_name == "dirsearch":
+                command, target, error = self._build_dirsearch_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (dirsearch): {error}"))
+                    continue
+
+                temp_json_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_json:
+                        temp_json_path = tmp_json.name
+                    command = [arg for arg in command if not arg.startswith('--json-report')]
+                    command.extend(["--json-report", temp_json_path])
+                except Exception as e:
+                    q.put(('error', 'LAB File Error', f"Step {i+1} (dirsearch): Could not create temp file: {e}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success and temp_json_path and os.path.exists(temp_json_path):
+                    try:
+                        with open(temp_json_path, 'r', encoding='utf-8') as f:
+                            json_data = f.read()
+                        if json_data:
+                            # TODO: Parse found paths and add to context
+                            q.put(('lab_status', f"dirsearch finished against {target}."))
+                    except Exception as e:
+                         q.put(('error', 'LAB File Error', f"Step {i+1} (dirsearch): Could not read temp file: {e}"))
+                    finally:
+                        os.remove(temp_json_path)
+                else:
+                    q.put(('lab_status', f"Step {i+1} (dirsearch) returned no output or failed."))
+            elif tool_name == "ffuf":
+                command, target, error = self._build_ffuf_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (ffuf): {error}"))
+                    continue
+
+                temp_json_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_json:
+                        temp_json_path = tmp_json.name
+                    command.extend(["-o", temp_json_path, "-of", "json"])
+                except Exception as e:
+                    q.put(('error', 'LAB File Error', f"Step {i+1} (ffuf): Could not create temp file: {e}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success and temp_json_path and os.path.exists(temp_json_path):
+                    try:
+                        with open(temp_json_path, 'r', encoding='utf-8') as f:
+                            json_data = f.read()
+                        if json_data:
+                            # TODO: Parse found paths and add to context
+                            q.put(('lab_status', f"ffuf finished against {target}."))
+                    except Exception as e:
+                         q.put(('error', 'LAB File Error', f"Step {i+1} (ffuf): Could not read temp file: {e}"))
+                    finally:
+                        os.remove(temp_json_path)
+                else:
+                    q.put(('lab_status', f"Step {i+1} (ffuf) returned no output or failed."))
+
+            elif tool_name == "enum4linux-ng":
+                command, target, error = self._build_enum4linux_ng_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (enum4linux-ng): {error}"))
+                    continue
+
+                temp_json_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_json:
+                        temp_json_path = tmp_json.name
+                    command.insert(1, "-oJ")
+                    command.insert(2, temp_json_path)
+                except Exception as e:
+                    q.put(('error', 'LAB File Error', f"Step {i+1} (enum4linux-ng): Could not create temp file: {e}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success and temp_json_path and os.path.exists(temp_json_path):
+                    try:
+                        with open(temp_json_path, 'r', encoding='utf-8') as f:
+                            json_data = f.read()
+                        if json_data:
+                            # TODO: Parse found info and add to context
+                            q.put(('lab_status', f"enum4linux-ng finished against {target}."))
+                    except Exception as e:
+                         q.put(('error', 'LAB File Error', f"Step {i+1} (enum4linux-ng): Could not read temp file: {e}"))
+                    finally:
+                        os.remove(temp_json_path)
+                else:
+                    q.put(('lab_status', f"Step {i+1} (enum4linux-ng) returned no output or failed."))
+
+            elif tool_name == "dnsrecon":
+                command, target, error = self._build_dnsrecon_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (dnsrecon): {error}"))
+                    continue
+
+                temp_json_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".json", encoding='utf-8') as tmp_json:
+                        temp_json_path = tmp_json.name
+                    command = [arg for arg in command if not arg.startswith('--json')]
+                    command.extend(["--json", temp_json_path])
+                except Exception as e:
+                    q.put(('error', 'LAB File Error', f"Step {i+1} (dnsrecon): Could not create temp file: {e}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success and temp_json_path and os.path.exists(temp_json_path):
+                    try:
+                        with open(temp_json_path, 'r', encoding='utf-8') as f:
+                            json_data = f.read()
+                        if json_data:
+                            # TODO: Parse found records and add to context
+                            q.put(('lab_status', f"dnsrecon finished against {target}."))
+                    except Exception as e:
+                         q.put(('error', 'LAB File Error', f"Step {i+1} (dnsrecon): Could not read temp file: {e}"))
+                    finally:
+                        os.remove(temp_json_path)
+                else:
+                    q.put(('lab_status', f"Step {i+1} (dnsrecon) returned no output or failed."))
+
+            elif tool_name == "fierce":
+                command, target, error = self._build_fierce_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (fierce): {error}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success:
+                    # TODO: Parse output and add to context
+                    q.put(('lab_status', f"fierce finished against {target}."))
+                else:
+                    q.put(('lab_status', f"Step {i+1} (fierce) returned no output or failed."))
+
+            elif tool_name == "Nikto Scan":
+                command, target, error = self._build_nikto_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Nikto): {error}"))
+                    continue
+
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+
+                if success:
+                    # TODO: Parse output and add to context
+                    q.put(('lab_status', f"Nikto finished against {target}."))
+                else:
+                    q.put(('lab_status', f"Step {i+1} (Nikto) returned no output or failed."))
+
+            elif tool_name == "Gobuster":
+                command, target, error = self._build_gobuster_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Gobuster): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"Gobuster finished against {target}."))
+
+            elif tool_name == "WhatWeb":
+                command, target, error = self._build_whatweb_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (WhatWeb): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"WhatWeb finished against {target}."))
+
+            elif tool_name == "Masscan":
+                command, target, error = self._build_masscan_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Masscan): {error}"))
+                    continue
+                # Masscan requires sudo
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"Masscan finished against {target}."))
+
+            elif tool_name == "SQLMap":
+                command, target, error = self._build_sqlmap_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (SQLMap): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"SQLMap finished against {target}."))
+
+            elif tool_name == "Hashcat":
+                command, target, error = self._build_hashcat_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Hashcat): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"Hashcat finished against {target}."))
+
+            elif tool_name == "Nuclei Scanner":
+                command, target, error = self._build_nuclei_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Nuclei): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"Nuclei finished against {target}."))
+
+            elif tool_name == "TruffleHog Scanner":
+                command, target, error = self._build_trufflehog_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (TruffleHog): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"TruffleHog finished against {target}."))
+
+            elif tool_name == "John the Ripper":
+                # JTR has two modes, we assume crack mode for the lab
+                command, target, error = self._build_jtr_command(config, crack_mode=True)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (JTR): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"John the Ripper finished against {target}."))
+
+            elif tool_name == "Hydra":
+                command, target, error = self._build_hydra_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Hydra): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"Hydra finished against {target}."))
+
+            elif tool_name == "Sherlock":
+                temp_dir = None
+                try:
+                    temp_dir = tempfile.mkdtemp()
+                    command, target, error = self._build_sherlock_command(config, csv_temp_dir=temp_dir)
+                    if error:
+                        q.put(('error', 'LAB Error', f"Step {i+1} (Sherlock): {error}"))
+                        continue
+                    success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                    q.put(('lab_status', f"Sherlock finished against {target}."))
+                finally:
+                    if temp_dir and os.path.exists(temp_dir):
+                        shutil.rmtree(temp_dir)
+
+            elif tool_name == "Spiderfoot":
+                command, target, error = self._build_spiderfoot_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Spiderfoot): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"Spiderfoot finished against {target}."))
+
+            elif tool_name == "ARP Scan (CLI)":
+                command, target, error = self._build_arp_scan_cli_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (arp-scan): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"arp-scan finished against {target}."))
+
+            elif tool_name == "Wifite Auditor":
+                command, target, error = self._build_wifite_command(config)
+                if error:
+                    q.put(('error', 'LAB Error', f"Step {i+1} (Wifite): {error}"))
+                    continue
+                success, output = self._execute_blocking_command_for_lab(command, tool_name)
+                q.put(('lab_status', f"Wifite finished against {target}."))
+            else:
+                q.put(('lab_output', f"\n--- Skipping unimplemented tool: {tool_name} ---\n"))
+                time.sleep(1)
 
 
         q.put(('tool_finished', 'lab_chain'))
