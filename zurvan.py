@@ -2210,6 +2210,202 @@ class Zurvan(QMainWindow):
         if self.current_user:
             database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
 
+    def _show_lock_screen(self):
+        """Displays the application lock screen."""
+        if not self.current_user:
+            return # Should not happen if the UI is enabled, but good practice
+
+        # Re-fetch user data to get the latest settings
+        user_data = database.get_user_by_id(self.current_user['id'])
+        if not user_data:
+            QMessageBox.critical(self, "Error", "Could not retrieve current user data.")
+            return
+
+        unlock_method = user_data.get('app_unlock_method', 'password')
+        password_hash = user_data.get('password_hash')
+        pin_hash = user_data.get('pin_hash')
+
+        if unlock_method == 'pin' and not pin_hash:
+            QMessageBox.warning(self, "PIN Not Set", "Unlock method is set to PIN, but no PIN has been configured. Please set a PIN in your profile or change the unlock method.")
+            return
+
+        def verification_callback(entered_value):
+            """Nested function to verify the entered password or PIN."""
+            if unlock_method == 'password':
+                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == password_hash
+            elif unlock_method == 'pin':
+                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == pin_hash
+            return False
+
+        lock_dialog = AppLockDialog(
+            unlock_method=unlock_method,
+            verification_callback=verification_callback,
+            parent=self
+        )
+        lock_dialog.exec()
+
+    def _setup_app_lock_monitor(self):
+        """Initializes and starts the activity monitor and auto-lock timer."""
+        # Setup timer
+        self.auto_lock_timer = QTimer(self)
+        self.auto_lock_timer.setSingleShot(True)
+        self.auto_lock_timer.timeout.connect(self._show_lock_screen)
+
+        # Setup event filter
+        self.activity_monitor = ActivityMonitorEventFilter()
+        self.activity_monitor.user_active.connect(self._reset_auto_lock_timer)
+        QApplication.instance().installEventFilter(self.activity_monitor)
+
+        logging.info("App Lock activity monitor installed.")
+        self._reset_auto_lock_timer()
+
+    def _load_and_apply_user_settings(self):
+        """Loads user-specific settings from DB and applies them to the UI."""
+        if not self.current_user:
+            return
+
+        user_data = database.get_user_by_id(self.current_user['id'])
+        if not user_data:
+            return
+
+        # App Lock Timeout
+        self.app_lock_timeout_minutes = user_data.get('app_lock_timeout', 15)
+        for action in self.app_lock_timeout_group.actions():
+            if action.data() == self.app_lock_timeout_minutes:
+                action.setChecked(True)
+                break
+        self._reset_auto_lock_timer() # Start timer with loaded value
+
+        # App Lock Unlock Method
+        unlock_method = user_data.get('app_unlock_method', 'password')
+        for action in self.app_unlock_method_group.actions():
+            if action.text().lower().startswith(unlock_method):
+                action.setChecked(True)
+                break
+
+    def _reset_auto_lock_timer(self):
+        """Stops and restarts the auto-lock timer if a timeout is set."""
+        if self.auto_lock_timer and self.app_lock_timeout_minutes > 0:
+            self.auto_lock_timer.start(self.app_lock_timeout_minutes * 60 * 1000) # Convert minutes to ms
+
+    def _handle_auto_lock_change(self, action):
+        """Handles when the user changes the auto-lock timeout."""
+        self.app_lock_timeout_minutes = action.data()
+        if self.app_lock_timeout_minutes == 0:
+            self.auto_lock_timer.stop()
+            logging.info("Auto-lock timer disabled.")
+        else:
+            self._reset_auto_lock_timer()
+            logging.info(f"Auto-lock timeout set to {self.app_lock_timeout_minutes} minutes.")
+
+        # Save to DB
+        if self.current_user:
+            current_method_action = self.app_unlock_method_group.checkedAction()
+            current_method = "pin" if current_method_action and "pin" in current_method_action.text().lower() else "password"
+            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, current_method)
+
+    def _handle_unlock_method_change(self, action):
+        """Handles when the user changes the unlock method."""
+        method = "pin" if "pin" in action.text().lower() else "password"
+        logging.info(f"App unlock method changed to: {method}")
+        # Save to DB
+        if self.current_user:
+            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
+
+    def _show_lock_screen(self):
+        """Displays the application lock screen."""
+        if not self.current_user:
+            return
+
+        user_data = database.get_user_by_id(self.current_user['id'])
+        if not user_data:
+            QMessageBox.critical(self, "Error", "Could not retrieve current user data.")
+            return
+
+        unlock_method = user_data.get('app_unlock_method', 'password')
+        password_hash = user_data.get('password_hash')
+        pin_hash = user_data.get('pin_hash')
+
+        if unlock_method == 'pin' and not pin_hash:
+            QMessageBox.warning(self, "PIN Not Set", "Unlock method is set to PIN, but no PIN has been configured. Please set a PIN in your profile or change the unlock method.")
+            return
+
+        def verification_callback(entered_value):
+            if unlock_method == 'password':
+                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == password_hash
+            elif unlock_method == 'pin':
+                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == pin_hash
+            return False
+
+        lock_dialog = AppLockDialog(
+            unlock_method=unlock_method,
+            verification_callback=verification_callback,
+            parent=self
+        )
+        lock_dialog.exec()
+
+    def _setup_app_lock_monitor(self):
+        """Initializes and starts the activity monitor and auto-lock timer."""
+        self.auto_lock_timer = QTimer(self)
+        self.auto_lock_timer.setSingleShot(True)
+        self.auto_lock_timer.timeout.connect(self._show_lock_screen)
+
+        self.activity_monitor = ActivityMonitorEventFilter()
+        self.activity_monitor.user_active.connect(self._reset_auto_lock_timer)
+        QApplication.instance().installEventFilter(self.activity_monitor)
+
+        logging.info("App Lock activity monitor installed.")
+        self._reset_auto_lock_timer()
+
+    def _load_and_apply_user_settings(self):
+        """Loads user-specific settings from DB and applies them to the UI."""
+        if not self.current_user:
+            return
+
+        user_data = database.get_user_by_id(self.current_user['id'])
+        if not user_data:
+            return
+
+        self.app_lock_timeout_minutes = user_data.get('app_lock_timeout', 15)
+        for action in self.app_lock_timeout_group.actions():
+            if action.data() == self.app_lock_timeout_minutes:
+                action.setChecked(True)
+                break
+        self._reset_auto_lock_timer()
+
+        unlock_method = user_data.get('app_unlock_method', 'password')
+        for action in self.app_unlock_method_group.actions():
+            if action.text().lower().startswith(unlock_method):
+                action.setChecked(True)
+                break
+
+    def _reset_auto_lock_timer(self):
+        """Stops and restarts the auto-lock timer if a timeout is set."""
+        if self.auto_lock_timer and self.app_lock_timeout_minutes > 0:
+            self.auto_lock_timer.start(self.app_lock_timeout_minutes * 60 * 1000)
+
+    def _handle_auto_lock_change(self, action):
+        """Handles when the user changes the auto-lock timeout."""
+        self.app_lock_timeout_minutes = action.data()
+        if self.app_lock_timeout_minutes == 0:
+            self.auto_lock_timer.stop()
+            logging.info("Auto-lock timer disabled.")
+        else:
+            self._reset_auto_lock_timer()
+            logging.info(f"Auto-lock timeout set to {self.app_lock_timeout_minutes} minutes.")
+
+        if self.current_user:
+            current_method_action = self.app_unlock_method_group.checkedAction()
+            current_method = "pin" if current_method_action and "pin" in current_method_action.text().lower() else "password"
+            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, current_method)
+
+    def _handle_unlock_method_change(self, action):
+        """Handles when the user changes the unlock method."""
+        method = "pin" if "pin" in action.text().lower() else "password"
+        logging.info(f"App unlock method changed to: {method}")
+        if self.current_user:
+            database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
+
     def _handle_theme_change(self, theme_name):
         theme_file = f"{theme_name}.xml"
         invert_secondary = "light" in theme_name
@@ -11547,41 +11743,6 @@ def main():
         app = QApplication(sys.argv)
         QMessageBox.critical(None, "Unhandled Exception", f"An unexpected error occurred:\n\n{e}")
         sys.exit(1)
-
-    def _show_lock_screen(self):
-        """Displays the application lock screen."""
-        if not self.current_user:
-            return # Should not happen if the UI is enabled, but good practice
-
-        # Re-fetch user data to get the latest settings
-        user_data = database.get_user_by_id(self.current_user['id'])
-        if not user_data:
-            QMessageBox.critical(self, "Error", "Could not retrieve current user data.")
-            return
-
-        unlock_method = user_data.get('app_unlock_method', 'password')
-        password_hash = user_data.get('password_hash')
-        pin_hash = user_data.get('pin_hash')
-
-        if unlock_method == 'pin' and not pin_hash:
-            QMessageBox.warning(self, "PIN Not Set", "Unlock method is set to PIN, but no PIN has been configured. Please set a PIN in your profile or change the unlock method.")
-            # In a real scenario, you might default to password here, but for now, this is safer.
-            return
-
-        def verification_callback(entered_value):
-            """Nested function to verify the entered password or PIN."""
-            if unlock_method == 'password':
-                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == password_hash
-            elif unlock_method == 'pin':
-                return hashlib.sha256(entered_value.encode('utf-8')).hexdigest() == pin_hash
-            return False
-
-        lock_dialog = AppLockDialog(
-            unlock_method=unlock_method,
-            verification_callback=verification_callback,
-            parent=self
-        )
-        lock_dialog.exec()
 
 if __name__ == "__main__":
     main()
