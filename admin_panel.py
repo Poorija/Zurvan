@@ -84,6 +84,26 @@ class AdminPanelDialog(QDialog):
         profile_form.addRow(self.save_profile_btn)
         bottom_layout.addWidget(profile_box, 1) # Give it more stretch
 
+        # App Lock settings box
+        app_lock_box = QGroupBox("App Lock Settings")
+        app_lock_form = QFormLayout(app_lock_box)
+
+        self.admin_app_lock_timeout_combo = QComboBox()
+        timeouts = {"5 Minutes": 5, "15 Minutes": 15, "30 Minutes": 30, "1 Hour": 60, "Disabled": 0}
+        for text, minutes in timeouts.items():
+            self.admin_app_lock_timeout_combo.addItem(text, userData=minutes)
+
+        self.admin_app_unlock_method_combo = QComboBox()
+        self.admin_app_unlock_method_combo.addItems(["password", "pin"])
+
+        self.admin_reset_pin_btn = QPushButton("Reset User PIN")
+
+        app_lock_form.addRow("Auto-lock Timeout:", self.admin_app_lock_timeout_combo)
+        app_lock_form.addRow("Unlock Method:", self.admin_app_unlock_method_combo)
+        app_lock_form.addRow(self.admin_reset_pin_btn)
+        bottom_layout.addWidget(app_lock_box)
+
+
         main_splitter.addWidget(bottom_pane)
         main_splitter.setSizes([400, 200]) # Initial size ratio
         tab_layout.addWidget(main_splitter)
@@ -98,6 +118,9 @@ class AdminPanelDialog(QDialog):
         self.reset_password_btn.clicked.connect(self._reset_user_password)
         self.save_profile_btn.clicked.connect(self._save_profile)
         self.refresh_btn.clicked.connect(self._populate_users)
+        self.admin_app_lock_timeout_combo.currentIndexChanged.connect(self._handle_admin_save_lock_settings)
+        self.admin_app_unlock_method_combo.currentIndexChanged.connect(self._handle_admin_save_lock_settings)
+        self.admin_reset_pin_btn.clicked.connect(self._handle_admin_reset_pin)
 
         # Initially disable editing widgets
         self._set_editing_widgets_enabled(False)
@@ -273,6 +296,10 @@ class AdminPanelDialog(QDialog):
         self.age_edit.setEnabled(enabled)
         self.job_title_edit.setEnabled(enabled)
         self.save_profile_btn.setEnabled(enabled)
+        self.admin_app_lock_timeout_combo.setEnabled(enabled)
+        self.admin_app_unlock_method_combo.setEnabled(enabled)
+        self.admin_reset_pin_btn.setEnabled(enabled)
+
 
     def _clear_profile_fields(self):
         """Clears the text from the profile editing fields."""
@@ -341,6 +368,55 @@ class AdminPanelDialog(QDialog):
         age = profile_data.get("age")
         self.age_edit.setText(str(age) if age is not None else "")
         self.job_title_edit.setCurrentText(profile_data.get("job_title") or "")
+
+        # Populate App Lock settings, blocking signals to prevent premature saves
+        user_data = database.get_user_by_id(int(current.text(0)))
+        self.admin_app_lock_timeout_combo.blockSignals(True)
+        timeout = user_data.get('app_lock_timeout', 15)
+        index = self.admin_app_lock_timeout_combo.findData(timeout)
+        if index != -1:
+            self.admin_app_lock_timeout_combo.setCurrentIndex(index)
+        self.admin_app_lock_timeout_combo.blockSignals(False)
+
+        self.admin_app_unlock_method_combo.blockSignals(True)
+        method = user_data.get('app_unlock_method', 'password')
+        self.admin_app_unlock_method_combo.setCurrentText(method)
+        self.admin_app_unlock_method_combo.blockSignals(False)
+
+
+    def _handle_admin_save_lock_settings(self):
+        """Saves the app lock settings for the selected user from the admin panel."""
+        user_id = self._get_selected_user_id()
+        if user_id is None:
+            return
+
+        timeout = self.admin_app_lock_timeout_combo.currentData()
+        method = self.admin_app_unlock_method_combo.currentText()
+
+        try:
+            database.update_user_app_lock_settings(user_id, timeout, method)
+            # No need for a popup, the change is instant. A status bar message could be added in the future.
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"Failed to update App Lock settings: {e}")
+
+    def _handle_admin_reset_pin(self):
+        """Resets the selected user's App Lock PIN."""
+        user_id = self._get_selected_user_id()
+        if user_id is None:
+            return
+
+        username = self.user_tree.selectedItems()[0].text(1)
+        reply = QMessageBox.question(self, "Confirm PIN Reset",
+                                     f"Are you sure you want to reset the App Lock PIN for '{username}'?\nThey will need to set a new one in their profile.",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                database.clear_user_pin(user_id)
+                QMessageBox.information(self, "Success", f"PIN for '{username}' has been reset.")
+            except Exception as e:
+                QMessageBox.critical(self, "Database Error", f"Failed to reset PIN: {e}")
+
 
     def _save_profile(self):
         """Saves all changes from the profile fields to the database."""

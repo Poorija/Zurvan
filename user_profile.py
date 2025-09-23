@@ -64,8 +64,24 @@ class UserProfileDialog(QDialog):
         password_layout.addRow("Confirm New Password:", self.confirm_password_edit)
         self.main_layout.addWidget(password_box)
 
+        # --- App Lock PIN Section ---
+        pin_box = QGroupBox("App Lock PIN")
+        pin_layout = QFormLayout(pin_box)
+        self.new_pin_edit = QLineEdit()
+        self.new_pin_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.new_pin_edit.setPlaceholderText("Enter a 4-8 digit PIN")
+        self.confirm_pin_edit = QLineEdit()
+        self.confirm_pin_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.confirm_pin_edit.setPlaceholderText("Confirm your new PIN")
+        pin_layout.addRow("New PIN:", self.new_pin_edit)
+        pin_layout.addRow("Confirm PIN:", self.confirm_pin_edit)
+        set_pin_btn = QPushButton("Set/Change PIN")
+        set_pin_btn.clicked.connect(self._handle_pin_change)
+        pin_layout.addRow(set_pin_btn)
+        self.main_layout.addWidget(pin_box)
+
         # --- Save Button ---
-        self.save_btn = QPushButton("Save Changes")
+        self.save_btn = QPushButton("Save Profile Changes")
         self.save_btn.clicked.connect(self._save_changes)
         self.main_layout.addWidget(self.save_btn)
 
@@ -93,6 +109,33 @@ class UserProfileDialog(QDialog):
         if file_path:
             pixmap = QPixmap(file_path)
             self.avatar_label.setPixmap(pixmap.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    def _handle_pin_change(self):
+        """Validates and saves a new App Lock PIN."""
+        new_pin = self.new_pin_edit.text()
+        confirm_pin = self.confirm_pin_edit.text()
+
+        if not new_pin or not confirm_pin:
+            QMessageBox.warning(self, "Input Error", "Please fill both PIN fields to set or change your PIN.")
+            return
+
+        if not new_pin.isdigit() or not (4 <= len(new_pin) <= 8):
+            QMessageBox.warning(self, "Invalid PIN", "PIN must be between 4 and 8 digits.")
+            return
+
+        if new_pin != confirm_pin:
+            QMessageBox.warning(self, "PIN Mismatch", "The entered PINs do not match.")
+            return
+
+        try:
+            database.update_user_pin(self.user['id'], new_pin)
+            QMessageBox.information(self, "Success", "Your App Lock PIN has been updated.")
+            self.new_pin_edit.clear()
+            self.confirm_pin_edit.clear()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not update PIN: {e}")
+            logging.error(f"Error updating PIN for user {self.user['id']}: {e}", exc_info=True)
+
 
     def _save_changes(self):
         """Validates input and saves all changes to the database."""
