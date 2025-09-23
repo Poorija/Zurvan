@@ -4,7 +4,7 @@ import os
 from PyQt6.QtWidgets import (
     QApplication, QDialog, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QStackedWidget, QFormLayout, QMessageBox, QGroupBox, QComboBox,
-    QGraphicsOpacityEffect, QCheckBox
+    QGraphicsOpacityEffect, QCheckBox, QProgressBar
 )
 from qt_material import apply_stylesheet, list_themes
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
@@ -52,6 +52,7 @@ class PasswordResetDialog(QDialog):
     def _create_identifier_page(self):
         page = QWidget()
         layout = QFormLayout(page)
+        layout.setVerticalSpacing(15)
         self.identifier_edit = QLineEdit()
         self.identifier_edit.setPlaceholderText("Enter your username or email")
         layout.addRow("Username or Email:", self.identifier_edit)
@@ -64,18 +65,64 @@ class PasswordResetDialog(QDialog):
     def _create_questions_page(self):
         page = QWidget()
         self.questions_layout = QFormLayout(page)
+        self.questions_layout.setVerticalSpacing(15)
         self.questions_layout.addRow(QLabel("Please answer your security questions:"))
         return page
 
     def _create_new_password_page(self):
         page = QWidget()
         layout = QFormLayout(page)
+        layout.setVerticalSpacing(15)
         self.new_pass_edit = QLineEdit()
         self.new_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_pass_edit = QLineEdit()
         self.confirm_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addRow("New Password:", self.new_pass_edit)
-        layout.addRow("Confirm Password:", self.confirm_pass_edit)
+
+        # New Password field with toggle
+        new_pass_container = QWidget()
+        new_pass_layout = QHBoxLayout(new_pass_container)
+        new_pass_layout.setContentsMargins(0,0,0,0)
+        new_pass_layout.addWidget(self.new_pass_edit)
+        new_pass_toggle_button = QPushButton()
+        new_pass_toggle_button.setCheckable(True)
+        new_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        new_pass_toggle_button.setChecked(False)
+        new_pass_toggle_button.setFixedSize(28, 28)
+        new_pass_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        new_pass_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        def toggle_new_pass_visibility(checked):
+            if checked:
+                self.new_pass_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                new_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+            else:
+                self.new_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                new_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        new_pass_toggle_button.toggled.connect(toggle_new_pass_visibility)
+        new_pass_layout.addWidget(new_pass_toggle_button)
+        layout.addRow("New Password:", new_pass_container)
+
+        # Confirm New Password field with toggle
+        confirm_pass_container = QWidget()
+        confirm_pass_layout = QHBoxLayout(confirm_pass_container)
+        confirm_pass_layout.setContentsMargins(0,0,0,0)
+        confirm_pass_layout.addWidget(self.confirm_pass_edit)
+        confirm_pass_toggle_button = QPushButton()
+        confirm_pass_toggle_button.setCheckable(True)
+        confirm_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        confirm_pass_toggle_button.setChecked(False)
+        confirm_pass_toggle_button.setFixedSize(28, 28)
+        confirm_pass_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        confirm_pass_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        def toggle_confirm_pass_visibility(checked):
+            if checked:
+                self.confirm_pass_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                confirm_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+            else:
+                self.confirm_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                confirm_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        confirm_pass_toggle_button.toggled.connect(toggle_confirm_pass_visibility)
+        confirm_pass_layout.addWidget(confirm_pass_toggle_button)
+        layout.addRow("Confirm Password:", confirm_pass_container)
 
         reset_btn = QPushButton("Reset Password")
         reset_btn.clicked.connect(self._handle_set_new_password)
@@ -161,6 +208,7 @@ class LoginDialog(QDialog):
         self.current_user = None
         self.selected_theme = 'dark_cyan.xml' # Default theme
         self.captcha_text = None
+        self.reg_captcha_text = None
 
         # --- Main Layout and Styling ---
         main_layout = QVBoxLayout(self)
@@ -180,7 +228,7 @@ class LoginDialog(QDialog):
         script_dir = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(script_dir, "icons", "Zurvan.png")
         pixmap = QPixmap(icon_path)
-        self.logo_label.setPixmap(pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        self.logo_label.setPixmap(pixmap.scaled(120, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
         header_layout.addWidget(self.logo_label)
 
         # Text container
@@ -190,13 +238,13 @@ class LoginDialog(QDialog):
         text_layout.setSpacing(0)
 
         # App Name
-        app_name_label = QLabel("Zurvan + AI")
+        app_name_label = QLabel("Zurvan")
         app_name_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #bbbbbb;")
         app_name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         text_layout.addWidget(app_name_label)
 
         # Slogan
-        slogan_label = QLabel("The Modern Scapy Interface with AI")
+        slogan_label = QLabel("The Modern Scapy Interface, now with AI capabilities.")
         slogan_label.setStyleSheet("font-size: 14px; color: #888888;")
         slogan_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         text_layout.addWidget(slogan_label)
@@ -239,7 +287,7 @@ class LoginDialog(QDialog):
 
         # --- Animation & Initial State ---
         self.start_logo_animation()
-        self._refresh_captcha() # Load the first captcha
+        self._refresh_captcha('login') # Load the first captcha for login page
 
     def _handle_password_reset_request(self):
         """Opens the password reset dialog."""
@@ -303,15 +351,51 @@ class LoginDialog(QDialog):
         self.animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
         self.animation.start()
 
-    def _refresh_captcha(self):
-        """Generates a new captcha and updates the UI."""
+    def _show_tos_popup(self, link):
+        """Displays the Terms of Service in a pop-up dialog."""
+        tos_text = """
+        <h2>Terms of Service for Zurvan</h2>
+        <p><strong>Last Updated: September 22, 2025</strong></p>
+        <p>Welcome to Zurvan! These terms and conditions outline the rules and regulations for the use of this software.</p>
+
+        <h3>1. Acceptance of Terms</h3>
+        <p>By accessing and using this software, you accept and agree to be bound by the terms and provision of this agreement. If you do not agree to abide by these terms, please do not use this software.</p>
+
+        <h3>2. Disclaimer of Liability</h3>
+        <p>Zurvan is a tool designed for network analysis and security research. The user acknowledges that any actions and or activities related to the use of Zurvan are the sole responsibility of the user. The developers of Zurvan assume no liability and are not responsible for any misuse or damage caused by this program. It is the end user's responsibility to obey all applicable local, state, and federal laws. This tool is intended for educational and professional purposes ONLY.</p>
+
+        <h3>3. Prohibited Use</h3>
+        <p>You agree not to use the software for any unlawful purpose or any purpose prohibited under this clause. You agree not to use the software in any way that could damage the software, services, or general business of the developers.</p>
+
+        <h3>4. Changes to Terms</h3>
+        <p>We reserve the right to modify these terms at any time. We will notify you of any changes by posting the new Terms of Service in this software. You are advised to review these Terms of Service periodically for any changes.</p>
+        """
+        tos_dialog = QMessageBox(self)
+        tos_dialog.setWindowTitle("Terms of Service")
+        tos_dialog.setTextFormat(Qt.TextFormat.RichText)
+        tos_dialog.setText(tos_text)
+        tos_dialog.setIcon(QMessageBox.Icon.Information)
+        tos_dialog.exec()
+
+    def _refresh_captcha(self, context='login'):
+        """Generates a new captcha and updates the UI for the given context."""
         try:
             pixmap, text = generate_captcha()
-            self.captcha_image_label.setPixmap(pixmap)
-            self.captcha_text = text
+            if context == 'login':
+                self.captcha_image_label.setPixmap(pixmap)
+                self.captcha_text = text
+            elif context == 'register':
+                self.reg_captcha_image_label.setPixmap(pixmap)
+                self.reg_captcha_text = text
         except Exception:
-            self.captcha_image_label.setText("Captcha Failed")
-            self.captcha_text = "fallback" # Set a fallback to prevent login lockout
+            error_message = "Captcha Failed"
+            fallback_text = "fallback"
+            if context == 'login':
+                self.captcha_image_label.setText(error_message)
+                self.captcha_text = fallback_text
+            elif context == 'register':
+                self.reg_captcha_image_label.setText(error_message)
+                self.reg_captcha_text = fallback_text
             logging.error("Failed to generate captcha", exc_info=True)
 
     def _create_login_page(self):
@@ -323,6 +407,7 @@ class LoginDialog(QDialog):
         login_box.setStyleSheet("QGroupBox { border: 1px solid #444; padding: 15px; }")
 
         self.login_form_layout = QFormLayout(login_box)
+        self.login_form_layout.setVerticalSpacing(15)
 
         # --- Lockout UI ---
         self.lockout_widget = QWidget()
@@ -340,7 +425,32 @@ class LoginDialog(QDialog):
         self.login_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
         self.login_form_layout.addRow("Username:", self.login_username_edit)
-        self.login_form_layout.addRow("Password:", self.login_password_edit)
+
+        # Password field with toggle button
+        password_container = QWidget()
+        password_layout = QHBoxLayout(password_container)
+        password_layout.setContentsMargins(0, 0, 0, 0)
+        password_layout.addWidget(self.login_password_edit)
+
+        toggle_button = QPushButton()
+        toggle_button.setCheckable(True)
+        toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        toggle_button.setChecked(False)
+        toggle_button.setFixedSize(28, 28)
+        toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+
+        def toggle_login_password_visibility(checked):
+            if checked:
+                self.login_password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+            else:
+                self.login_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+
+        toggle_button.toggled.connect(toggle_login_password_visibility)
+        password_layout.addWidget(toggle_button)
+        self.login_form_layout.addRow("Password:", password_container)
 
         # --- Captcha ---
         self.captcha_image_label = QLabel("Captcha loading...")
@@ -348,7 +458,7 @@ class LoginDialog(QDialog):
         self.captcha_input_edit.setPlaceholderText("Enter Captcha Text")
         refresh_captcha_btn = QPushButton(" Regenerate")
         refresh_captcha_btn.setIcon(QIcon.fromTheme("view-refresh", QIcon("icons/refresh-cw.svg"))) # Use themed icon with fallback
-        refresh_captcha_btn.clicked.connect(self._refresh_captcha)
+        refresh_captcha_btn.clicked.connect(lambda: self._refresh_captcha('login'))
 
         captcha_group_layout = QHBoxLayout()
         captcha_group_layout.addWidget(self.captcha_image_label, 2)
@@ -394,6 +504,7 @@ class LoginDialog(QDialog):
         register_box = QGroupBox("Create New Account")
         register_box.setStyleSheet("QGroupBox { border: 1px solid #444; padding: 15px; }")
         form_layout = QFormLayout(register_box)
+        form_layout.setVerticalSpacing(15)
 
         self.reg_username_edit = QLineEdit()
         self.reg_email_edit = QLineEdit()
@@ -404,8 +515,72 @@ class LoginDialog(QDialog):
 
         form_layout.addRow("Username:", self.reg_username_edit)
         form_layout.addRow("Email:", self.reg_email_edit)
-        form_layout.addRow("Password:", self.reg_password_edit)
-        form_layout.addRow("Confirm Password:", self.reg_confirm_password_edit)
+
+        # Password field with toggle
+        reg_password_container = QWidget()
+        reg_password_layout = QHBoxLayout(reg_password_container)
+        reg_password_layout.setContentsMargins(0,0,0,0)
+        reg_password_layout.addWidget(self.reg_password_edit)
+        reg_toggle_button = QPushButton()
+        reg_toggle_button.setCheckable(True)
+        reg_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        reg_toggle_button.setChecked(False)
+        reg_toggle_button.setFixedSize(28, 28)
+        reg_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        reg_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        def toggle_reg_password_visibility(checked):
+            if checked:
+                self.reg_password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                reg_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+            else:
+                self.reg_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                reg_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        reg_toggle_button.toggled.connect(toggle_reg_password_visibility)
+        reg_password_layout.addWidget(reg_toggle_button)
+        form_layout.addRow("Password:", reg_password_container)
+
+        # Confirm Password field with toggle
+        reg_confirm_container = QWidget()
+        reg_confirm_layout = QHBoxLayout(reg_confirm_container)
+        reg_confirm_layout.setContentsMargins(0,0,0,0)
+        reg_confirm_layout.addWidget(self.reg_confirm_password_edit)
+        reg_confirm_toggle_button = QPushButton()
+        reg_confirm_toggle_button.setCheckable(True)
+        reg_confirm_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        reg_confirm_toggle_button.setChecked(False)
+        reg_confirm_toggle_button.setFixedSize(28, 28)
+        reg_confirm_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        reg_confirm_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        def toggle_reg_confirm_password_visibility(checked):
+            if checked:
+                self.reg_confirm_password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                reg_confirm_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+            else:
+                self.reg_confirm_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                reg_confirm_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        reg_confirm_toggle_button.toggled.connect(toggle_reg_confirm_password_visibility)
+        reg_confirm_layout.addWidget(reg_confirm_toggle_button)
+        form_layout.addRow("Confirm Password:", reg_confirm_container)
+
+        # --- Password Strength Meter ---
+        self.strength_bar = QProgressBar()
+        self.strength_bar.setRange(0, 3) # One point for each criterion
+        self.strength_bar.setValue(0)
+        self.strength_bar.setTextVisible(False)
+        self.requirements_label = QLabel()
+
+        # Use a container widget to hold the bar and label
+        strength_container = QWidget()
+        strength_layout = QVBoxLayout(strength_container)
+        strength_layout.setContentsMargins(0, 5, 0, 0)
+        strength_layout.setSpacing(5)
+        strength_layout.addWidget(self.strength_bar)
+        strength_layout.addWidget(self.requirements_label)
+        form_layout.addRow("Password Strength:", strength_container)
+
+        # Connect signal and set initial state
+        self.reg_password_edit.textChanged.connect(self._update_password_strength)
+        self._update_password_strength("") # Set initial empty state
 
         # --- Security Questions ---
         self.security_questions_widgets = []
@@ -428,6 +603,35 @@ class LoginDialog(QDialog):
 
         self._set_initial_questions()
         form_layout.addRow(questions_box)
+
+        # --- Captcha ---
+        self.reg_captcha_image_label = QLabel("Captcha loading...")
+        self.reg_captcha_input_edit = QLineEdit()
+        self.reg_captcha_input_edit.setPlaceholderText("Enter Captcha Text")
+        reg_refresh_captcha_btn = QPushButton(" Regenerate")
+        reg_refresh_captcha_btn.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'refresh-cw.svg')))
+        reg_refresh_captcha_btn.clicked.connect(lambda: self._refresh_captcha('register'))
+
+        reg_captcha_layout = QHBoxLayout()
+        reg_captcha_layout.addWidget(self.reg_captcha_image_label, 2)
+        reg_captcha_layout.addWidget(self.reg_captcha_input_edit, 2)
+        reg_captcha_layout.addWidget(reg_refresh_captcha_btn, 1)
+        form_layout.addRow("Captcha:", reg_captcha_layout)
+        self._refresh_captcha('register') # Load initial captcha for register page
+
+        # --- Terms of Service ---
+        self.tos_checkbox = QCheckBox()
+        tos_label = QLabel("I agree to the <a href='#'>Terms of Service</a>")
+        tos_label.setOpenExternalLinks(False)
+        tos_label.linkActivated.connect(self._show_tos_popup)
+
+        tos_container = QWidget()
+        tos_layout = QHBoxLayout(tos_container)
+        tos_layout.setContentsMargins(0, 5, 0, 0)
+        tos_layout.addWidget(self.tos_checkbox)
+        tos_layout.addWidget(tos_label)
+        tos_layout.addStretch()
+        form_layout.addRow("", tos_container)
 
         register_button = QPushButton("Register")
         register_button.clicked.connect(self._handle_register)
@@ -483,6 +687,55 @@ class LoginDialog(QDialog):
                 combo.setCurrentIndex(new_index_to_set)
 
             combo.blockSignals(False)
+
+    def _update_password_strength(self, password):
+        """Checks password complexity and updates UI elements in real-time."""
+        has_length = len(password) >= 6
+        has_digit = any(c.isdigit() for c in password)
+        special_chars = r"!@#$%^&*()_+-=[]{}|;':,./<>?"
+        has_special = any(c in special_chars for c in password)
+
+        criteria_met = [has_length, has_digit, has_special]
+        score = sum(criteria_met)
+
+        # Build requirements text with colors
+        reqs = {
+            "✓ At least 6 characters": has_length,
+            "✓ At least one number": has_digit,
+            "✓ At least one special character": has_special
+        }
+        req_html = []
+        for text, met in reqs.items():
+            color = "green" if met else "#888888"
+            # Replace checkmark with a dash if not met
+            display_text = text if met else text.replace('✓', '-')
+            req_html.append(f"<font color='{color}'>{display_text}</font>")
+        self.requirements_label.setText("<br>".join(req_html))
+
+        # Update progress bar value and color
+        self.strength_bar.setValue(score)
+        if score == 0:
+            color = "#2b2b2b"
+        elif score == 1:
+            color = "red"
+        elif score == 2:
+            color = "orange"
+        else: # score == 3
+            color = "green"
+
+        self.strength_bar.setStyleSheet(f'''
+            QProgressBar {{
+                border: 1px solid #444;
+                border-radius: 4px;
+                background-color: #2b2b2b;
+                text-align: center;
+                height: 10px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {color};
+                border-radius: 4px;
+            }}
+        ''')
 
     def _handle_login(self):
         username = self.login_username_edit.text().strip()
@@ -550,10 +803,33 @@ class LoginDialog(QDialog):
         admin_box = QGroupBox("Administrator Login")
         admin_box.setStyleSheet("QGroupBox { border: 1px solid #ccaa00; padding: 15px; }")
         form_layout = QFormLayout(admin_box)
+        form_layout.setVerticalSpacing(15)
 
         self.admin_password_edit = QLineEdit()
         self.admin_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        form_layout.addRow("Admin Password:", self.admin_password_edit)
+
+        # Admin Password field with toggle
+        admin_password_container = QWidget()
+        admin_password_layout = QHBoxLayout(admin_password_container)
+        admin_password_layout.setContentsMargins(0,0,0,0)
+        admin_password_layout.addWidget(self.admin_password_edit)
+        admin_toggle_button = QPushButton()
+        admin_toggle_button.setCheckable(True)
+        admin_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        admin_toggle_button.setChecked(False)
+        admin_toggle_button.setFixedSize(28, 28)
+        admin_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        admin_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        def toggle_admin_password_visibility(checked):
+            if checked:
+                self.admin_password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+                admin_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+            else:
+                self.admin_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+                admin_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+        admin_toggle_button.toggled.connect(toggle_admin_password_visibility)
+        admin_password_layout.addWidget(admin_toggle_button)
+        form_layout.addRow("Admin Password:", admin_password_container)
 
         admin_login_btn = QPushButton("Login as Admin")
         admin_login_btn.clicked.connect(self._handle_admin_login)
@@ -626,14 +902,31 @@ class LoginDialog(QDialog):
         email = self.reg_email_edit.text().strip()
         password = self.reg_password_edit.text()
         confirm_password = self.reg_confirm_password_edit.text()
+        captcha_input = self.reg_captcha_input_edit.text().strip()
 
         # --- Validation ---
-        if not all([username, email, password, confirm_password]):
+        if not all([username, email, password, confirm_password, captcha_input]):
             QMessageBox.warning(self, "Input Error", "All fields are required.")
             return
+
+        if captcha_input.upper() != self.reg_captcha_text.upper():
+            QMessageBox.warning(self, "Input Error", "Incorrect captcha. Please try again.")
+            self._refresh_captcha('register')
+            return
+
+        if not self.tos_checkbox.isChecked():
+            QMessageBox.warning(self, "Input Error", "You must accept the Terms of Service to register.")
+            return
+
         if password != confirm_password:
             QMessageBox.warning(self, "Input Error", "Passwords do not match.")
             return
+
+        # Check password strength requirements before proceeding
+        if not (len(password) >= 6 and any(c.isdigit() for c in password) and any(c in r"!@#$%^&*()_+-=[]{}|;':,./<>?" for c in password)):
+            QMessageBox.warning(self, "Password Too Weak", "Your password does not meet the complexity requirements.\nPlease ensure it has at least 6 characters, one number, and one special character.")
+            return
+
         if database.check_username_or_email_exists(username, email):
             QMessageBox.warning(self, "Input Error", "Username or email already exists.")
             return
@@ -658,7 +951,7 @@ class LoginDialog(QDialog):
             user_id = database.create_user(username, email, password)
             database.add_security_questions(user_id, questions_with_answers)
             QMessageBox.information(self, "Success", "Account created successfully! Please log in.")
-            self.stacked_widget.setCurrentWidget(self.login_page)
+            self.stacked_widget.setCurrentWidget(self.login_page_stack) # Go back to the login view
         except Exception as e:
             QMessageBox.critical(self, "Database Error", f"An error occurred during registration: {e}")
 

@@ -1665,6 +1665,8 @@ class Zurvan(QMainWindow):
                                      QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
+            if self.current_user:
+                database.log_login_event(self.current_user.get('username'), 'Logout', self.current_user.get('id'))
             # Stop background threads before restarting
             logging.info("User confirmed logout. Stopping background threads.")
             if self.sniffer_thread and self.sniffer_thread.isRunning(): self.sniffer_thread.stop()
@@ -1977,6 +1979,19 @@ class Zurvan(QMainWindow):
         self.iface_combo.currentTextChanged.connect(self._update_tool_targets)
         header_layout.addWidget(self.iface_combo)
 
+        # --- Tor Proxy Toggle ---
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.VLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        header_layout.addWidget(separator)
+        header_layout.addSpacing(10)
+
+        self.tor_proxy_check = QCheckBox("Use Tor Proxy")
+        self.tor_proxy_check.setToolTip("Route all compatible tool traffic through a local Tor SOCKS proxy (127.0.0.1:9050).")
+        header_layout.addWidget(self.tor_proxy_check)
+        self.tor_status_label = QLabel("Tor Status: [?]")
+        header_layout.addWidget(self.tor_status_label)
+
         header_layout.addStretch()
 
         # Theme Switcher
@@ -1985,19 +2000,6 @@ class Zurvan(QMainWindow):
         self.theme_combo.addItems([theme.replace('.xml', '') for theme in list_themes()])
         self.theme_combo.textActivated.connect(self._handle_theme_change)
         header_layout.addWidget(self.theme_combo)
-
-        # --- Tor Proxy Toggle ---
-        header_layout.addStretch()
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        header_layout.addWidget(separator)
-
-        self.tor_proxy_check = QCheckBox("Use Tor Proxy")
-        self.tor_proxy_check.setToolTip("Route all compatible tool traffic through a local Tor SOCKS proxy (127.0.0.1:9050).")
-        header_layout.addWidget(self.tor_proxy_check)
-        self.tor_status_label = QLabel("Tor Status: [?]")
-        header_layout.addWidget(self.tor_status_label)
 
         self.main_layout.addWidget(header_frame)
 
@@ -4458,6 +4460,37 @@ class Zurvan(QMainWindow):
         self.active_threads.append(self.worker)
         self.worker.start()
 
+    def _create_whatweb_config_widget(self):
+        """Creates a reusable, self-contained widget with WhatWeb's configuration options."""
+        widget = QGroupBox("Scan Options")
+        # In a real app, you might want a QWidget as the base and put the QGroupBox inside it
+        # but for this structure, returning the groupbox is fine.
+        controls_layout = QFormLayout(widget)
+        controls = {}
+
+        controls['target_edit'] = QLineEdit("http://localhost")
+        controls['target_edit'].setToolTip("Enter one or more targets to scan, separated by spaces.\nCan be URLs, hostnames, or IP ranges.")
+        controls_layout.addRow("Target(s):", controls['target_edit'])
+
+        controls['aggression_combo'] = QComboBox()
+        controls['aggression_combo'].addItems(["1 - Stealthy", "3 - Aggressive", "4 - Heavy"])
+        controls['aggression_combo'].setToolTip("Set the aggression level (-a).\n- 1 (Stealthy): Light and fast, makes few requests.\n- 3 (Aggressive): Makes more requests, may trigger alerts.\n- 4 (Heavy): Very noisy, runs every single plugin.")
+        controls_layout.addRow("Aggression Level (-a):", controls['aggression_combo'])
+
+        controls['verbose_check'] = QCheckBox("Enable Verbose Output (-v)")
+        controls['verbose_check'].setToolTip("Enable verbose output (-v).\nShows more detail during the scan, including which plugins are running.")
+        controls_layout.addRow(controls['verbose_check'])
+
+        controls['extra_opts_edit'] = QLineEdit()
+        controls['extra_opts_edit'].setToolTip("Enter any additional, space-separated WhatWeb flags here. These will be appended directly to the command.")
+        controls_layout.addRow("Additional Raw Options:", controls['extra_opts_edit'])
+
+        # These are needed for the main tab to function correctly, but might be ignored by the LAB
+        controls['start_btn'] = QPushButton(QIcon("icons/search.svg"), " Start WhatWeb Scan")
+        controls['stop_btn'] = QPushButton("Stop WhatWeb"); controls['stop_btn'].setEnabled(False)
+
+        return widget, controls
+
     def _create_whatweb_tool(self):
         """Creates the UI for the WhatWeb tool."""
         widget = QWidget()
@@ -4473,34 +4506,13 @@ class Zurvan(QMainWindow):
         main_layout.addWidget(instructions)
 
         # --- Controls ---
-        controls_frame = QGroupBox("Scan Options")
-        controls_layout = QFormLayout(controls_frame)
-
-        self.whatweb_target_edit = QLineEdit("http://localhost")
-        self.whatweb_target_edit.setToolTip("Enter one or more targets to scan, separated by spaces.\nCan be URLs, hostnames, or IP ranges.")
-        controls_layout.addRow("Target(s):", self.whatweb_target_edit)
-
-        self.whatweb_aggression_combo = QComboBox()
-        self.whatweb_aggression_combo.addItems(["1 - Stealthy", "3 - Aggressive", "4 - Heavy"])
-        self.whatweb_aggression_combo.setToolTip("Set the aggression level (-a).\n- 1 (Stealthy): Light and fast, makes few requests.\n- 3 (Aggressive): Makes more requests, may trigger alerts.\n- 4 (Heavy): Very noisy, runs every single plugin.")
-        controls_layout.addRow("Aggression Level (-a):", self.whatweb_aggression_combo)
-
-        self.whatweb_verbose_check = QCheckBox("Enable Verbose Output (-v)")
-        self.whatweb_verbose_check.setToolTip("Enable verbose output (-v).\nShows more detail during the scan, including which plugins are running.")
-        controls_layout.addRow(self.whatweb_verbose_check)
-
-        self.whatweb_extra_opts_edit = QLineEdit()
-        self.whatweb_extra_opts_edit.setToolTip("Enter any additional, space-separated WhatWeb flags here. These will be appended directly to the command.")
-        controls_layout.addRow("Additional Raw Options:", self.whatweb_extra_opts_edit)
-
+        controls_frame, self.whatweb_controls = self._create_whatweb_config_widget()
         main_layout.addWidget(controls_frame)
 
         # --- Action Buttons ---
         buttons_layout = QHBoxLayout()
-        self.whatweb_start_btn = QPushButton(QIcon("icons/search.svg"), " Start WhatWeb Scan")
-        self.whatweb_stop_btn = QPushButton("Stop WhatWeb"); self.whatweb_stop_btn.setEnabled(False)
-        buttons_layout.addWidget(self.whatweb_start_btn)
-        buttons_layout.addWidget(self.whatweb_stop_btn)
+        buttons_layout.addWidget(self.whatweb_controls['start_btn'])
+        buttons_layout.addWidget(self.whatweb_controls['stop_btn'])
         main_layout.addLayout(buttons_layout)
 
         # --- Output Console ---
@@ -4510,13 +4522,14 @@ class Zurvan(QMainWindow):
         self.whatweb_output_console.setPlaceholderText("WhatWeb output will be displayed here...")
         main_layout.addWidget(self.whatweb_output_console, 1)
 
-        self.whatweb_start_btn.clicked.connect(self.start_whatweb_scan)
-        self.whatweb_stop_btn.clicked.connect(self.cancel_tool)
+        self.whatweb_controls['start_btn'].clicked.connect(self.start_whatweb_scan)
+        self.whatweb_controls['stop_btn'].clicked.connect(self.cancel_tool)
 
         return widget
 
     def start_whatweb_scan(self):
         """Starts the WhatWeb scan worker thread."""
+        controls = self.whatweb_controls
         if not shutil.which("whatweb"):
             QMessageBox.critical(self, "WhatWeb Error", "'whatweb' command not found. Please ensure it is installed and in your system's PATH.")
             return
@@ -4525,7 +4538,7 @@ class Zurvan(QMainWindow):
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        target = self.whatweb_target_edit.text().strip()
+        target = controls['target_edit'].text().strip()
         if not target:
             QMessageBox.critical(self, "Input Error", "A target is required.")
             return
@@ -4533,23 +4546,23 @@ class Zurvan(QMainWindow):
         command = ["whatweb"]
 
         # Aggression
-        aggression_level = self.whatweb_aggression_combo.currentText().split(" ")[0]
+        aggression_level = controls['aggression_combo'].currentText().split(" ")[0]
         command.extend(["-a", aggression_level])
 
         # Verbose
-        if self.whatweb_verbose_check.isChecked():
+        if controls['verbose_check'].isChecked():
             command.append("-v")
 
         # Additional Options
-        if extra_opts := self.whatweb_extra_opts_edit.text().strip():
+        if extra_opts := controls['extra_opts_edit'].text().strip():
             command.extend(extra_opts.split())
 
         # Target(s) must be last
         command.extend(target.split())
 
         self.is_tool_running = True
-        self.whatweb_start_btn.setEnabled(False)
-        self.whatweb_stop_btn.setEnabled(True)
+        controls['start_btn'].setEnabled(False)
+        controls['stop_btn'].setEnabled(True)
         self.tool_stop_event.clear()
         self.whatweb_output_console.clear()
 
@@ -4557,10 +4570,12 @@ class Zurvan(QMainWindow):
         self.active_threads.append(self.worker)
         self.worker.start()
 
-    def _create_sqlmap_tool(self):
-        """Creates the UI for the SQLMap tool."""
+    def _create_sqlmap_config_widget(self):
+        """Creates a reusable, self-contained widget with SQLMap's configuration options."""
         widget = QWidget()
         main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0,0,0,0)
+        controls = {}
 
         instructions = QTextEdit()
         instructions.setReadOnly(True)
@@ -4578,14 +4593,14 @@ class Zurvan(QMainWindow):
         # --- Target Tab ---
         target_tab = QWidget()
         target_layout = QFormLayout(target_tab)
-        self.sqlmap_url_edit = QLineEdit()
-        self.sqlmap_url_edit.setToolTip('Target URL to test. Must be a full URL including the vulnerable parameter(s).\nExample: "http://testphp.vulnweb.com/listproducts.php?cat=1"')
-        target_layout.addRow("Target URL (-u):", self.sqlmap_url_edit)
+        controls['url_edit'] = QLineEdit()
+        controls['url_edit'].setToolTip('Target URL to test. Must be a full URL including the vulnerable parameter(s).\nExample: "http://testphp.vulnweb.com/listproducts.php?cat=1"')
+        target_layout.addRow("Target URL (-u):", controls['url_edit'])
 
         req_file_layout = QHBoxLayout()
-        self.sqlmap_reqfile_edit = QLineEdit()
-        self.sqlmap_reqfile_edit.setToolTip("Load a raw HTTP request from a file (e.g., from Burp Suite).\nThis is often more reliable than using the URL field, especially for complex requests with headers and POST data.")
-        req_file_layout.addWidget(self.sqlmap_reqfile_edit)
+        controls['reqfile_edit'] = QLineEdit()
+        controls['reqfile_edit'].setToolTip("Load a raw HTTP request from a file (e.g., from Burp Suite).\nThis is often more reliable than using the URL field, especially for complex requests with headers and POST data.")
+        req_file_layout.addWidget(controls['reqfile_edit'])
         browse_req_btn = QPushButton("Browse...")
         browse_req_btn.clicked.connect(self.browse_sqlmap_request_file)
         req_file_layout.addWidget(browse_req_btn)
@@ -4595,118 +4610,130 @@ class Zurvan(QMainWindow):
         # --- Request Tab ---
         req_tab = QWidget()
         req_layout = QFormLayout(req_tab)
-        self.sqlmap_method_edit = QLineEdit()
-        req_layout.addRow("Method:", self.sqlmap_method_edit)
-        self.sqlmap_data_edit = QLineEdit(); self.sqlmap_data_edit.setToolTip("POST data to send with the request (--data).")
-        req_layout.addRow("Data (--data):", self.sqlmap_data_edit)
-        self.sqlmap_cookie_edit = QLineEdit(); self.sqlmap_cookie_edit.setToolTip("HTTP Cookie header value (--cookie). Format: 'name=value; name2=value2'.")
-        req_layout.addRow("Cookie (--cookie):", self.sqlmap_cookie_edit)
-        self.sqlmap_useragent_edit = QLineEdit(); self.sqlmap_useragent_edit.setToolTip("Set a custom User-Agent (--user-agent). 'SQLMAP' is the default.")
-        req_layout.addRow("User-Agent (--user-agent):", self.sqlmap_useragent_edit)
-        self.sqlmap_referer_edit = QLineEdit(); self.sqlmap_referer_edit.setToolTip("Set a custom HTTP Referer header (--referer).")
-        req_layout.addRow("Referer (--referer):", self.sqlmap_referer_edit)
-        self.sqlmap_headers_edit = QTextEdit(); self.sqlmap_headers_edit.setToolTip("Extra headers to include in the request (--headers).\nFormat: 'Header1: Value1\\nHeader2: Value2'.")
-        req_layout.addRow("Extra Headers (--headers):", self.sqlmap_headers_edit)
-        self.sqlmap_auth_type_edit = QLineEdit()
-        req_layout.addRow("Auth Type (--auth-type):", self.sqlmap_auth_type_edit)
-        self.sqlmap_auth_cred_edit = QLineEdit()
-        req_layout.addRow("Auth Creds (--auth-cred):", self.sqlmap_auth_cred_edit)
-        self.sqlmap_proxy_edit = QLineEdit()
-        req_layout.addRow("Proxy (--proxy):", self.sqlmap_proxy_edit)
-        self.sqlmap_random_agent_check = QCheckBox("Random Agent (--random-agent)")
-        req_layout.addRow(self.sqlmap_random_agent_check)
-        self.sqlmap_force_ssl_check = QCheckBox("Force SSL (--force-ssl)")
-        req_layout.addRow(self.sqlmap_force_ssl_check)
+        controls['method_edit'] = QLineEdit()
+        req_layout.addRow("Method:", controls['method_edit'])
+        controls['data_edit'] = QLineEdit(); controls['data_edit'].setToolTip("POST data to send with the request (--data).")
+        req_layout.addRow("Data (--data):", controls['data_edit'])
+        controls['cookie_edit'] = QLineEdit(); controls['cookie_edit'].setToolTip("HTTP Cookie header value (--cookie). Format: 'name=value; name2=value2'.")
+        req_layout.addRow("Cookie (--cookie):", controls['cookie_edit'])
+        controls['useragent_edit'] = QLineEdit(); controls['useragent_edit'].setToolTip("Set a custom User-Agent (--user-agent). 'SQLMAP' is the default.")
+        req_layout.addRow("User-Agent (--user-agent):", controls['useragent_edit'])
+        controls['referer_edit'] = QLineEdit(); controls['referer_edit'].setToolTip("Set a custom HTTP Referer header (--referer).")
+        req_layout.addRow("Referer (--referer):", controls['referer_edit'])
+        controls['headers_edit'] = QTextEdit(); controls['headers_edit'].setToolTip("Extra headers to include in the request (--headers).\nFormat: 'Header1: Value1\\nHeader2: Value2'.")
+        req_layout.addRow("Extra Headers (--headers):", controls['headers_edit'])
+        controls['auth_type_edit'] = QLineEdit()
+        req_layout.addRow("Auth Type (--auth-type):", controls['auth_type_edit'])
+        controls['auth_cred_edit'] = QLineEdit()
+        req_layout.addRow("Auth Creds (--auth-cred):", controls['auth_cred_edit'])
+        controls['proxy_edit'] = QLineEdit()
+        req_layout.addRow("Proxy (--proxy):", controls['proxy_edit'])
+        controls['random_agent_check'] = QCheckBox("Random Agent (--random-agent)")
+        req_layout.addRow(controls['random_agent_check'])
+        controls['force_ssl_check'] = QCheckBox("Force SSL (--force-ssl)")
+        req_layout.addRow(controls['force_ssl_check'])
         sqlmap_tabs.addTab(req_tab, "Request")
 
         # --- Injection Tab ---
         inj_tab = QWidget()
         inj_layout = QFormLayout(inj_tab)
-        self.sqlmap_test_param_edit = QLineEdit(); self.sqlmap_test_param_edit.setToolTip("Specify a specific parameter to test for SQL injection (-p).")
-        inj_layout.addRow("Test Parameter (-p):", self.sqlmap_test_param_edit)
-        self.sqlmap_dbms_edit = QLineEdit(); self.sqlmap_dbms_edit.setToolTip("Force sqlmap to test for a specific backend DBMS (e.g., MySQL, MSSQL) (--dbms).")
-        inj_layout.addRow("DBMS (--dbms):", self.sqlmap_dbms_edit)
-        self.sqlmap_level_combo = QComboBox()
-        self.sqlmap_level_combo.addItems(["1","2","3","4","5"]); self.sqlmap_level_combo.setToolTip("Level of tests to perform (1-5). Higher levels perform more tests (--level).")
-        inj_layout.addRow("Level (1-5):", self.sqlmap_level_combo)
-        self.sqlmap_risk_combo = QComboBox()
-        self.sqlmap_risk_combo.addItems(["1","2","3"]); self.sqlmap_risk_combo.setToolTip("Risk of tests to perform (1-3). Higher risk tests are more likely to cause issues but may find more vulnerabilities (--risk).")
-        inj_layout.addRow("Risk (1-3):", self.sqlmap_risk_combo)
-        self.sqlmap_technique_edit = QLineEdit("BEUSTQ"); self.sqlmap_technique_edit.setToolTip("Specify the injection techniques to use (--technique).\nB: Boolean-based blind\nE: Error-based\nU: Union query-based\nS: Stacked queries\nT: Time-based blind\nQ: Inline queries")
-        inj_layout.addRow("Techniques (--technique):", self.sqlmap_technique_edit)
+        controls['test_param_edit'] = QLineEdit(); controls['test_param_edit'].setToolTip("Specify a specific parameter to test for SQL injection (-p).")
+        inj_layout.addRow("Test Parameter (-p):", controls['test_param_edit'])
+        controls['dbms_edit'] = QLineEdit(); controls['dbms_edit'].setToolTip("Force sqlmap to test for a specific backend DBMS (e.g., MySQL, MSSQL) (--dbms).")
+        inj_layout.addRow("DBMS (--dbms):", controls['dbms_edit'])
+        controls['level_combo'] = QComboBox()
+        controls['level_combo'].addItems(["1","2","3","4","5"]); controls['level_combo'].setToolTip("Level of tests to perform (1-5). Higher levels perform more tests (--level).")
+        inj_layout.addRow("Level (1-5):", controls['level_combo'])
+        controls['risk_combo'] = QComboBox()
+        controls['risk_combo'].addItems(["1","2","3"]); controls['risk_combo'].setToolTip("Risk of tests to perform (1-3). Higher risk tests are more likely to cause issues but may find more vulnerabilities (--risk).")
+        inj_layout.addRow("Risk (1-3):", controls['risk_combo'])
+        controls['technique_edit'] = QLineEdit("BEUSTQ"); controls['technique_edit'].setToolTip("Specify the injection techniques to use (--technique).\nB: Boolean-based blind\nE: Error-based\nU: Union query-based\nS: Stacked queries\nT: Time-based blind\nQ: Inline queries")
+        inj_layout.addRow("Techniques (--technique):", controls['technique_edit'])
         sqlmap_tabs.addTab(inj_tab, "Injection")
 
         # --- Enumeration Tab ---
         enum_tab = QWidget()
         enum_layout = QVBoxLayout(enum_tab)
         enum_grid = QGridLayout()
-        self.sqlmap_enum_all_check = QCheckBox("All (-a)"); self.sqlmap_enum_all_check.setToolTip("Enumerate everything (-a).")
-        self.sqlmap_enum_banner_check = QCheckBox("Banner (-b)"); self.sqlmap_enum_banner_check.setToolTip("Retrieve the DBMS banner (-b).")
-        self.sqlmap_enum_current_user_check = QCheckBox("Current User"); self.sqlmap_enum_current_user_check.setToolTip("Retrieve the current DBMS user (--current-user).")
-        self.sqlmap_enum_current_db_check = QCheckBox("Current DB"); self.sqlmap_enum_current_db_check.setToolTip("Retrieve the current database name (--current-db).")
-        self.sqlmap_enum_is_dba_check = QCheckBox("Is DBA?"); self.sqlmap_enum_is_dba_check.setToolTip("Check if the current user is a Database Administrator (--is-dba).")
-        self.sqlmap_enum_passwords_check = QCheckBox("Passwords"); self.sqlmap_enum_passwords_check.setToolTip("Attempt to dump DBMS user password hashes (--passwords).")
-        self.sqlmap_enum_dbs_check = QCheckBox("Databases"); self.sqlmap_enum_dbs_check.setToolTip("Enumerate all databases (--dbs).")
-        self.sqlmap_enum_tables_check = QCheckBox("Tables"); self.sqlmap_enum_tables_check.setToolTip("Enumerate tables in a specific database (--tables).")
-        self.sqlmap_enum_columns_check = QCheckBox("Columns"); self.sqlmap_enum_columns_check.setToolTip("Enumerate columns in a specific table (--columns).")
-        self.sqlmap_enum_schema_check = QCheckBox("Schema"); self.sqlmap_enum_schema_check.setToolTip("Enumerate the entire DBMS schema (--schema).")
-        self.sqlmap_enum_dump_check = QCheckBox("Dump Table Entries"); self.sqlmap_enum_dump_check.setToolTip("Dump entries from a specific table (--dump).")
-        self.sqlmap_enum_dump_all_check = QCheckBox("Dump All"); self.sqlmap_enum_dump_all_check.setToolTip("Dump all table entries from all databases. Warning: this can be very slow.")
-        enum_grid.addWidget(self.sqlmap_enum_all_check, 0, 0)
-        enum_grid.addWidget(self.sqlmap_enum_banner_check, 0, 1)
-        enum_grid.addWidget(self.sqlmap_enum_current_user_check, 0, 2)
-        enum_grid.addWidget(self.sqlmap_enum_current_db_check, 1, 0)
-        enum_grid.addWidget(self.sqlmap_enum_is_dba_check, 1, 1)
-        enum_grid.addWidget(self.sqlmap_enum_passwords_check, 1, 2)
-        enum_grid.addWidget(self.sqlmap_enum_dbs_check, 2, 0)
-        enum_grid.addWidget(self.sqlmap_enum_tables_check, 2, 1)
-        enum_grid.addWidget(self.sqlmap_enum_columns_check, 2, 2)
-        enum_grid.addWidget(self.sqlmap_enum_schema_check, 3, 0)
-        enum_grid.addWidget(self.sqlmap_enum_dump_check, 3, 1)
-        enum_grid.addWidget(self.sqlmap_enum_dump_all_check, 3, 2)
+        controls['enum_all_check'] = QCheckBox("All (-a)"); controls['enum_all_check'].setToolTip("Enumerate everything (-a).")
+        controls['enum_banner_check'] = QCheckBox("Banner (-b)"); controls['enum_banner_check'].setToolTip("Retrieve the DBMS banner (-b).")
+        controls['enum_current_user_check'] = QCheckBox("Current User"); controls['enum_current_user_check'].setToolTip("Retrieve the current DBMS user (--current-user).")
+        controls['enum_current_db_check'] = QCheckBox("Current DB"); controls['enum_current_db_check'].setToolTip("Retrieve the current database name (--current-db).")
+        controls['enum_is_dba_check'] = QCheckBox("Is DBA?"); controls['enum_is_dba_check'].setToolTip("Check if the current user is a Database Administrator (--is-dba).")
+        controls['enum_passwords_check'] = QCheckBox("Passwords"); controls['enum_passwords_check'].setToolTip("Attempt to dump DBMS user password hashes (--passwords).")
+        controls['enum_dbs_check'] = QCheckBox("Databases"); controls['enum_dbs_check'].setToolTip("Enumerate all databases (--dbs).")
+        controls['enum_tables_check'] = QCheckBox("Tables"); controls['enum_tables_check'].setToolTip("Enumerate tables in a specific database (--tables).")
+        controls['enum_columns_check'] = QCheckBox("Columns"); controls['enum_columns_check'].setToolTip("Enumerate columns in a specific table (--columns).")
+        controls['enum_schema_check'] = QCheckBox("Schema"); controls['enum_schema_check'].setToolTip("Enumerate the entire DBMS schema (--schema).")
+        controls['enum_dump_check'] = QCheckBox("Dump Table Entries"); controls['enum_dump_check'].setToolTip("Dump entries from a specific table (--dump).")
+        controls['enum_dump_all_check'] = QCheckBox("Dump All"); controls['enum_dump_all_check'].setToolTip("Dump all table entries from all databases. Warning: this can be very slow.")
+        enum_grid.addWidget(controls['enum_all_check'], 0, 0)
+        enum_grid.addWidget(controls['enum_banner_check'], 0, 1)
+        enum_grid.addWidget(controls['enum_current_user_check'], 0, 2)
+        enum_grid.addWidget(controls['enum_current_db_check'], 1, 0)
+        enum_grid.addWidget(controls['enum_is_dba_check'], 1, 1)
+        enum_grid.addWidget(controls['enum_passwords_check'], 1, 2)
+        enum_grid.addWidget(controls['enum_dbs_check'], 2, 0)
+        enum_grid.addWidget(controls['enum_tables_check'], 2, 1)
+        enum_grid.addWidget(controls['enum_columns_check'], 2, 2)
+        enum_grid.addWidget(controls['enum_schema_check'], 3, 0)
+        enum_grid.addWidget(controls['enum_dump_check'], 3, 1)
+        enum_grid.addWidget(controls['enum_dump_all_check'], 3, 2)
         enum_layout.addLayout(enum_grid)
         enum_form_layout = QFormLayout()
-        self.sqlmap_db_edit = QLineEdit(); self.sqlmap_db_edit.setToolTip("Database to use for enumeration (-D).")
-        enum_form_layout.addRow("Database (-D):", self.sqlmap_db_edit)
-        self.sqlmap_tbl_edit = QLineEdit(); self.sqlmap_tbl_edit.setToolTip("Table to use for enumeration (-T).")
-        enum_form_layout.addRow("Table (-T):", self.sqlmap_tbl_edit)
-        self.sqlmap_col_edit = QLineEdit(); self.sqlmap_col_edit.setToolTip("Column to use for enumeration (-C).")
-        enum_form_layout.addRow("Column (-C):", self.sqlmap_col_edit)
+        controls['db_edit'] = QLineEdit(); controls['db_edit'].setToolTip("Database to use for enumeration (-D).")
+        enum_form_layout.addRow("Database (-D):", controls['db_edit'])
+        controls['tbl_edit'] = QLineEdit(); controls['tbl_edit'].setToolTip("Table to use for enumeration (-T).")
+        enum_form_layout.addRow("Table (-T):", controls['tbl_edit'])
+        controls['col_edit'] = QLineEdit(); controls['col_edit'].setToolTip("Column to use for enumeration (-C).")
+        enum_form_layout.addRow("Column (-C):", controls['col_edit'])
         enum_layout.addLayout(enum_form_layout)
         sqlmap_tabs.addTab(enum_tab, "Enumeration")
 
         # --- Access Tab ---
         access_tab = QWidget()
         access_layout = QFormLayout(access_tab)
-        self.sqlmap_os_shell_check = QCheckBox("OS Shell (--os-shell)"); self.sqlmap_os_shell_check.setToolTip("Attempt to get an interactive OS shell (--os-shell). This requires a successful file write vulnerability.")
-        access_layout.addRow(self.sqlmap_os_shell_check)
-        self.sqlmap_sql_shell_check = QCheckBox("SQL Shell (--sql-shell)"); self.sqlmap_sql_shell_check.setToolTip("Get an interactive SQL shell (--sql-shell).")
-        access_layout.addRow(self.sqlmap_sql_shell_check)
+        controls['os_shell_check'] = QCheckBox("OS Shell (--os-shell)"); controls['os_shell_check'].setToolTip("Attempt to get an interactive OS shell (--os-shell). This requires a successful file write vulnerability.")
+        access_layout.addRow(controls['os_shell_check'])
+        controls['sql_shell_check'] = QCheckBox("SQL Shell (--sql-shell)"); controls['sql_shell_check'].setToolTip("Get an interactive SQL shell (--sql-shell).")
+        access_layout.addRow(controls['sql_shell_check'])
         sqlmap_tabs.addTab(access_tab, "Access")
 
         # --- General Tab ---
         general_tab = QWidget()
         general_layout = QFormLayout(general_tab)
-        self.sqlmap_threads_edit = QLineEdit("1"); self.sqlmap_threads_edit.setToolTip("Number of concurrent threads to use (--threads).")
-        general_layout.addRow("Threads (--threads):", self.sqlmap_threads_edit)
-        self.sqlmap_batch_check = QCheckBox("Batch Mode (--batch)"); self.sqlmap_batch_check.setToolTip("Run in batch mode (--batch). Never asks for user input, uses default answers.")
-        general_layout.addRow(self.sqlmap_batch_check)
-        self.sqlmap_flush_session_check = QCheckBox("Flush Session (--flush-session)"); self.sqlmap_flush_session_check.setToolTip("Flush session files for the target, starting fresh (--flush-session).")
-        general_layout.addRow(self.sqlmap_flush_session_check)
+        controls['threads_edit'] = QLineEdit("1"); controls['threads_edit'].setToolTip("Number of concurrent threads to use (--threads).")
+        general_layout.addRow("Threads (--threads):", controls['threads_edit'])
+        controls['batch_check'] = QCheckBox("Batch Mode (--batch)"); controls['batch_check'].setToolTip("Run in batch mode (--batch). Never asks for user input, uses default answers.")
+        general_layout.addRow(controls['batch_check'])
+        controls['flush_session_check'] = QCheckBox("Flush Session (--flush-session)"); controls['flush_session_check'].setToolTip("Flush session files for the target, starting fresh (--flush-session).")
+        general_layout.addRow(controls['flush_session_check'])
         sqlmap_tabs.addTab(general_tab, "General")
 
         # --- Additional Options ---
         main_layout.addWidget(QLabel("Additional Raw Options:"))
-        self.sqlmap_extra_opts_edit = QLineEdit()
-        self.sqlmap_extra_opts_edit.setToolTip("Enter any additional, space-separated SQLMap flags here. These will be appended to the command.")
-        main_layout.addWidget(self.sqlmap_extra_opts_edit)
+        controls['extra_opts_edit'] = QLineEdit()
+        controls['extra_opts_edit'].setToolTip("Enter any additional, space-separated SQLMap flags here. These will be appended to the command.")
+        main_layout.addWidget(controls['extra_opts_edit'])
+
+        # --- Action Buttons ---
+        controls['start_btn'] = QPushButton(QIcon("icons/search.svg"), " Start SQLMap Scan")
+        controls['stop_btn'] = QPushButton("Stop SQLMap"); controls['stop_btn'].setEnabled(False)
+
+        return widget, controls
+
+    def _create_sqlmap_tool(self):
+        """Creates the UI for the SQLMap tool."""
+        widget = QWidget()
+        main_layout = QVBoxLayout(widget)
+
+        config_widget, self.sqlmap_controls = self._create_sqlmap_config_widget()
+        main_layout.addWidget(config_widget)
 
         # --- Action Buttons ---
         buttons_layout = QHBoxLayout()
-        self.sqlmap_start_btn = QPushButton(QIcon("icons/search.svg"), " Start SQLMap Scan")
-        self.sqlmap_stop_btn = QPushButton("Stop SQLMap"); self.sqlmap_stop_btn.setEnabled(False)
-        buttons_layout.addWidget(self.sqlmap_start_btn)
-        buttons_layout.addWidget(self.sqlmap_stop_btn)
+        buttons_layout.addWidget(self.sqlmap_controls['start_btn'])
+        buttons_layout.addWidget(self.sqlmap_controls['stop_btn'])
         main_layout.addLayout(buttons_layout)
 
         # --- Output Console ---
@@ -4716,18 +4743,26 @@ class Zurvan(QMainWindow):
         self.sqlmap_output_console.setPlaceholderText("SQLMap output will be displayed here...")
         main_layout.addWidget(self.sqlmap_output_console, 1)
 
-        self.sqlmap_start_btn.clicked.connect(self.start_sqlmap_scan)
-        self.sqlmap_stop_btn.clicked.connect(self.cancel_tool)
+        self.sqlmap_controls['start_btn'].clicked.connect(self.start_sqlmap_scan)
+        self.sqlmap_controls['stop_btn'].clicked.connect(self.cancel_tool)
 
         return widget
 
     def browse_sqlmap_request_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Request File", "", "All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
         if file_path:
-            self.sqlmap_reqfile_edit.setText(file_path)
+            # Check if we are on the main SQLMap tab
+            if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "sqlmap_output_console"):
+                self.sqlmap_controls['reqfile_edit'].setText(file_path)
+            else: # We are in the LAB tab
+                for tool_name, config_data in self.lab_tool_configs.items():
+                    if config_data['widget'].isVisible() and tool_name == "SQLMap":
+                        config_data['controls']['reqfile_edit'].setText(file_path)
+                        break
 
     def start_sqlmap_scan(self):
         """Starts the SQLMap scan worker thread."""
+        controls = self.sqlmap_controls
         if not shutil.which("sqlmap"):
             QMessageBox.critical(self, "SQLMap Error", "'sqlmap' command not found. Please ensure it is installed and in your system's PATH.")
             return
@@ -4739,8 +4774,8 @@ class Zurvan(QMainWindow):
         command = ["sqlmap"]
 
         # --- Target Tab ---
-        url = self.sqlmap_url_edit.text().strip()
-        reqfile = self.sqlmap_reqfile_edit.text().strip()
+        url = controls['url_edit'].text().strip()
+        reqfile = controls['reqfile_edit'].text().strip()
         if url:
             command.extend(["-u", url])
         elif reqfile:
@@ -4750,50 +4785,50 @@ class Zurvan(QMainWindow):
             return
 
         # --- Request Tab ---
-        if method := self.sqlmap_method_edit.text().strip(): command.extend(["--method", method])
-        if data := self.sqlmap_data_edit.text().strip(): command.extend(["--data", data])
-        if cookie := self.sqlmap_cookie_edit.text().strip(): command.extend(["--cookie", cookie])
-        if agent := self.sqlmap_useragent_edit.text().strip(): command.extend(["--user-agent", agent])
-        if referer := self.sqlmap_referer_edit.text().strip(): command.extend(["--referer", referer])
-        if headers := self.sqlmap_headers_edit.toPlainText().strip(): command.extend(["--headers", headers])
-        if auth_type := self.sqlmap_auth_type_edit.text().strip(): command.extend(["--auth-type", auth_type])
-        if auth_cred := self.sqlmap_auth_cred_edit.text().strip(): command.extend(["--auth-cred", auth_cred])
-        if proxy := self.sqlmap_proxy_edit.text().strip(): command.extend(["--proxy", proxy])
-        if self.sqlmap_random_agent_check.isChecked(): command.append("--random-agent")
-        if self.sqlmap_force_ssl_check.isChecked(): command.append("--force-ssl")
+        if method := controls['method_edit'].text().strip(): command.extend(["--method", method])
+        if data := controls['data_edit'].text().strip(): command.extend(["--data", data])
+        if cookie := controls['cookie_edit'].text().strip(): command.extend(["--cookie", cookie])
+        if agent := controls['useragent_edit'].text().strip(): command.extend(["--user-agent", agent])
+        if referer := controls['referer_edit'].text().strip(): command.extend(["--referer", referer])
+        if headers := controls['headers_edit'].toPlainText().strip(): command.extend(["--headers", headers])
+        if auth_type := controls['auth_type_edit'].text().strip(): command.extend(["--auth-type", auth_type])
+        if auth_cred := controls['auth_cred_edit'].text().strip(): command.extend(["--auth-cred", auth_cred])
+        if proxy := controls['proxy_edit'].text().strip(): command.extend(["--proxy", proxy])
+        if controls['random_agent_check'].isChecked(): command.append("--random-agent")
+        if controls['force_ssl_check'].isChecked(): command.append("--force-ssl")
 
         # --- Injection Tab ---
-        if test_param := self.sqlmap_test_param_edit.text().strip(): command.extend(["-p", test_param])
-        if dbms := self.sqlmap_dbms_edit.text().strip(): command.extend(["--dbms", dbms])
-        command.extend(["--level", self.sqlmap_level_combo.currentText()])
-        command.extend(["--risk", self.sqlmap_risk_combo.currentText()])
-        if tech := self.sqlmap_technique_edit.text().strip(): command.extend(["--technique", tech])
+        if test_param := controls['test_param_edit'].text().strip(): command.extend(["-p", test_param])
+        if dbms := controls['dbms_edit'].text().strip(): command.extend(["--dbms", dbms])
+        command.extend(["--level", controls['level_combo'].currentText()])
+        command.extend(["--risk", controls['risk_combo'].currentText()])
+        if tech := controls['technique_edit'].text().strip(): command.extend(["--technique", tech])
 
         # --- Enumeration Tab ---
-        if self.sqlmap_enum_all_check.isChecked(): command.append("-a")
-        if self.sqlmap_enum_banner_check.isChecked(): command.append("-b")
-        if self.sqlmap_enum_current_user_check.isChecked(): command.append("--current-user")
-        if self.sqlmap_enum_current_db_check.isChecked(): command.append("--current-db")
-        if self.sqlmap_enum_is_dba_check.isChecked(): command.append("--is-dba")
-        if self.sqlmap_enum_passwords_check.isChecked(): command.append("--passwords")
-        if self.sqlmap_enum_dbs_check.isChecked(): command.append("--dbs")
-        if self.sqlmap_enum_tables_check.isChecked(): command.append("--tables")
-        if self.sqlmap_enum_columns_check.isChecked(): command.append("--columns")
-        if self.sqlmap_enum_schema_check.isChecked(): command.append("--schema")
-        if self.sqlmap_enum_dump_check.isChecked(): command.append("--dump")
-        if self.sqlmap_enum_dump_all_check.isChecked(): command.append("--dump-all")
-        if db := self.sqlmap_db_edit.text().strip(): command.extend(["-D", db])
-        if tbl := self.sqlmap_tbl_edit.text().strip(): command.extend(["-T", tbl])
-        if col := self.sqlmap_col_edit.text().strip(): command.extend(["-C", col])
+        if controls['enum_all_check'].isChecked(): command.append("-a")
+        if controls['enum_banner_check'].isChecked(): command.append("-b")
+        if controls['enum_current_user_check'].isChecked(): command.append("--current-user")
+        if controls['enum_current_db_check'].isChecked(): command.append("--current-db")
+        if controls['enum_is_dba_check'].isChecked(): command.append("--is-dba")
+        if controls['enum_passwords_check'].isChecked(): command.append("--passwords")
+        if controls['enum_dbs_check'].isChecked(): command.append("--dbs")
+        if controls['enum_tables_check'].isChecked(): command.append("--tables")
+        if controls['enum_columns_check'].isChecked(): command.append("--columns")
+        if controls['enum_schema_check'].isChecked(): command.append("--schema")
+        if controls['enum_dump_check'].isChecked(): command.append("--dump")
+        if controls['enum_dump_all_check'].isChecked(): command.append("--dump-all")
+        if db := controls['db_edit'].text().strip(): command.extend(["-D", db])
+        if tbl := controls['tbl_edit'].text().strip(): command.extend(["-T", tbl])
+        if col := controls['col_edit'].text().strip(): command.extend(["-C", col])
 
         # --- Access Tab ---
-        if self.sqlmap_os_shell_check.isChecked(): command.append("--os-shell")
-        if self.sqlmap_sql_shell_check.isChecked(): command.append("--sql-shell")
+        if controls['os_shell_check'].isChecked(): command.append("--os-shell")
+        if controls['sql_shell_check'].isChecked(): command.append("--sql-shell")
 
         # --- General Tab ---
-        if threads := self.sqlmap_threads_edit.text().strip(): command.extend(["--threads", threads])
-        if self.sqlmap_batch_check.isChecked(): command.append("--batch")
-        if self.sqlmap_flush_session_check.isChecked(): command.append("--flush-session")
+        if threads := controls['threads_edit'].text().strip(): command.extend(["--threads", threads])
+        if controls['batch_check'].isChecked(): command.append("--batch")
+        if controls['flush_session_check'].isChecked(): command.append("--flush-session")
 
         # --- Default flags for GUI operation ---
         if "--batch" not in command:
@@ -4802,12 +4837,12 @@ class Zurvan(QMainWindow):
 
 
         # --- Additional Options ---
-        if extra_opts := self.sqlmap_extra_opts_edit.text().strip():
+        if extra_opts := controls['extra_opts_edit'].text().strip():
             command.extend(extra_opts.split())
 
         self.is_tool_running = True
-        self.sqlmap_start_btn.setEnabled(False)
-        self.sqlmap_stop_btn.setEnabled(True)
+        controls['start_btn'].setEnabled(False)
+        controls['stop_btn'].setEnabled(True)
         self.tool_stop_event.clear()
         self.sqlmap_output_console.clear()
 
@@ -4856,10 +4891,12 @@ class Zurvan(QMainWindow):
                 self.sqlmap_process = None
             logging.info("SQLMap scan thread finished.")
 
-    def _create_hashcat_tool(self):
-        """Creates the UI for the Hashcat tool."""
+    def _create_hashcat_config_widget(self):
+        """Creates a reusable, self-contained widget with Hashcat's configuration options."""
         widget = QWidget()
         main_layout = QVBoxLayout(widget)
+        main_layout.setContentsMargins(0,0,0,0)
+        controls = {}
 
         instructions = QTextEdit()
         instructions.setReadOnly(True)
@@ -4879,40 +4916,40 @@ class Zurvan(QMainWindow):
         config_layout = QFormLayout(config_tab)
 
         hashfile_layout = QHBoxLayout()
-        self.hashcat_hashfile_edit = QLineEdit()
-        self.hashcat_hashfile_edit.setToolTip("The file containing the hashes to crack.")
-        hashfile_layout.addWidget(self.hashcat_hashfile_edit)
+        controls['hashfile_edit'] = QLineEdit()
+        controls['hashfile_edit'].setToolTip("The file containing the hashes to crack.")
+        hashfile_layout.addWidget(controls['hashfile_edit'])
         browse_hash_btn = QPushButton("Browse...")
         browse_hash_btn.clicked.connect(self.browse_hashcat_hashfile)
         hashfile_layout.addWidget(browse_hash_btn)
         config_layout.addRow("Hash File:", hashfile_layout)
 
         hash_type_layout = QVBoxLayout()
-        self.hashcat_type_edit = QLineEdit()
-        self.hashcat_type_edit.setPlaceholderText("e.g., 0 for MD5, 1000 for NTLM")
-        self.hashcat_type_edit.setToolTip("The hash mode code (-m). Click the link below to find the correct mode for your hash type.")
+        controls['type_edit'] = QLineEdit()
+        controls['type_edit'].setPlaceholderText("e.g., 0 for MD5, 1000 for NTLM")
+        controls['type_edit'].setToolTip("The hash mode code (-m). Click the link below to find the correct mode for your hash type.")
         hash_type_label = QLabel("Hash Mode (-m):")
         hash_type_link = QLabel('<a href="https://hashcat.net/wiki/doku.php?id=example_hashes">Find Hash Mode</a>')
         hash_type_link.setOpenExternalLinks(True)
-        hash_type_layout.addWidget(self.hashcat_type_edit)
+        hash_type_layout.addWidget(controls['type_edit'])
         hash_type_layout.addWidget(hash_type_link)
         config_layout.addRow(hash_type_label, hash_type_layout)
 
-        self.hashcat_attack_mode_combo = QComboBox()
-        self.hashcat_attack_mode_combo.addItems([
+        controls['attack_mode_combo'] = QComboBox()
+        controls['attack_mode_combo'].addItems([
             "0 - Straight (Dictionary)",
             "1 - Combination",
             "3 - Brute-force (Mask)",
             "6 - Hybrid (Wordlist + Mask)",
             "7 - Hybrid (Mask + Wordlist)"
         ])
-        self.hashcat_attack_mode_combo.setToolTip("The attack mode (-a) to use.\n- Straight: Dictionary attack.\n- Combination: Combines words from two dictionaries.\n- Brute-force: Tries all possible character combinations based on a mask.\n- Hybrid: Combines dictionary words with a mask.")
-        config_layout.addRow("Attack Mode (-a):", self.hashcat_attack_mode_combo)
+        controls['attack_mode_combo'].setToolTip("The attack mode (-a) to use.\n- Straight: Dictionary attack.\n- Combination: Combines words from two dictionaries.\n- Brute-force: Tries all possible character combinations based on a mask.\n- Hybrid: Combines dictionary words with a mask.")
+        config_layout.addRow("Attack Mode (-a):", controls['attack_mode_combo'])
 
         outfile_layout = QHBoxLayout()
-        self.hashcat_outfile_edit = QLineEdit()
-        self.hashcat_outfile_edit.setToolTip("The file to save cracked hashes to (-o).")
-        outfile_layout.addWidget(self.hashcat_outfile_edit)
+        controls['outfile_edit'] = QLineEdit()
+        controls['outfile_edit'].setToolTip("The file to save cracked hashes to (-o).")
+        outfile_layout.addWidget(controls['outfile_edit'])
         browse_out_btn = QPushButton("Browse...")
         browse_out_btn.clicked.connect(self.browse_hashcat_outfile)
         outfile_layout.addWidget(browse_out_btn)
@@ -4921,58 +4958,69 @@ class Zurvan(QMainWindow):
         hashcat_tabs.addTab(config_tab, "Configuration")
 
         # --- Wordlist Tab ---
-        self.hashcat_wordlist_tab = QWidget()
-        wordlist_layout = QVBoxLayout(self.hashcat_wordlist_tab)
-        self.hashcat_wordlist_list = QListWidget()
-        wordlist_layout.addWidget(self.hashcat_wordlist_list)
+        controls['wordlist_tab'] = QWidget()
+        wordlist_layout = QVBoxLayout(controls['wordlist_tab'])
+        controls['wordlist_list'] = QListWidget()
+        wordlist_layout.addWidget(controls['wordlist_list'])
         wordlist_buttons = QHBoxLayout()
         add_wordlist_btn = QPushButton("Add Wordlist(s)")
         add_wordlist_btn.clicked.connect(self.browse_hashcat_wordlist)
         remove_wordlist_btn = QPushButton("Remove Selected")
-        remove_wordlist_btn.clicked.connect(lambda: self.hashcat_wordlist_list.takeItem(self.hashcat_wordlist_list.currentRow()))
+        remove_wordlist_btn.clicked.connect(lambda: controls['wordlist_list'].takeItem(controls['wordlist_list'].currentRow()))
         wordlist_buttons.addWidget(add_wordlist_btn)
         wordlist_buttons.addWidget(remove_wordlist_btn)
         wordlist_layout.addLayout(wordlist_buttons)
-        hashcat_tabs.addTab(self.hashcat_wordlist_tab, "Wordlists")
+        hashcat_tabs.addTab(controls['wordlist_tab'], "Wordlists")
 
         # --- Mask Tab ---
-        self.hashcat_mask_tab = QWidget()
-        mask_layout = QFormLayout(self.hashcat_mask_tab)
-        self.hashcat_mask_edit = QLineEdit()
-        self.hashcat_mask_edit.setPlaceholderText("e.g., ?l?l?l?l?l?l?l?l")
-        self.hashcat_mask_edit.setToolTip("The mask to use for brute-force or hybrid attacks. Click the link below for syntax details.")
-        mask_layout.addRow("Mask:", self.hashcat_mask_edit)
+        controls['mask_tab'] = QWidget()
+        mask_layout = QFormLayout(controls['mask_tab'])
+        controls['mask_edit'] = QLineEdit()
+        controls['mask_edit'].setPlaceholderText("e.g., ?l?l?l?l?l?l?l?l")
+        controls['mask_edit'].setToolTip("The mask to use for brute-force or hybrid attacks. Click the link below for syntax details.")
+        mask_layout.addRow("Mask:", controls['mask_edit'])
         mask_link = QLabel('<a href="https://hashcat.net/wiki/doku.php?id=mask_attack">Mask Attack Info</a>')
         mask_link.setOpenExternalLinks(True)
         mask_layout.addRow(mask_link)
-        hashcat_tabs.addTab(self.hashcat_mask_tab, "Mask")
+        hashcat_tabs.addTab(controls['mask_tab'], "Mask")
 
         # --- Advanced Tab ---
         adv_tab = QWidget()
         adv_layout = QFormLayout(adv_tab)
-        self.hashcat_force_check = QCheckBox("Ignore warnings")
-        self.hashcat_force_check.setToolTip("Ignore warnings and force the cracking session to start (--force).")
-        adv_layout.addRow("Force:", self.hashcat_force_check)
-        self.hashcat_extra_opts_edit = QLineEdit()
-        self.hashcat_extra_opts_edit.setToolTip("Enter any additional, space-separated Hashcat flags here. These will be appended to the command.")
-        adv_layout.addRow("Additional Options:", self.hashcat_extra_opts_edit)
+        controls['force_check'] = QCheckBox("Ignore warnings")
+        controls['force_check'].setToolTip("Ignore warnings and force the cracking session to start (--force).")
+        adv_layout.addRow("Force:", controls['force_check'])
+        controls['extra_opts_edit'] = QLineEdit()
+        controls['extra_opts_edit'].setToolTip("Enter any additional, space-separated Hashcat flags here. These will be appended to the command.")
+        adv_layout.addRow("Additional Options:", controls['extra_opts_edit'])
         adv_tab.setLayout(adv_layout)
         hashcat_tabs.addTab(adv_tab, "Advanced")
 
         # --- UI Logic ---
         def update_tabs(text):
             mode = int(text.split(" ")[0])
-            self.hashcat_wordlist_tab.setEnabled(mode in [0, 1, 6, 7])
-            self.hashcat_mask_tab.setEnabled(mode in [3, 6, 7])
-        self.hashcat_attack_mode_combo.currentTextChanged.connect(update_tabs)
-        update_tabs(self.hashcat_attack_mode_combo.currentText()) # Initial state
+            controls['wordlist_tab'].setEnabled(mode in [0, 1, 6, 7])
+            controls['mask_tab'].setEnabled(mode in [3, 6, 7])
+        controls['attack_mode_combo'].currentTextChanged.connect(update_tabs)
+        update_tabs(controls['attack_mode_combo'].currentText()) # Initial state
+
+        controls['start_btn'] = QPushButton(QIcon("icons/tool.svg"), " Start Hashcat")
+        controls['stop_btn'] = QPushButton("Stop Hashcat"); controls['stop_btn'].setEnabled(False)
+
+        return widget, controls
+
+    def _create_hashcat_tool(self):
+        """Creates the UI for the Hashcat tool."""
+        widget = QWidget()
+        main_layout = QVBoxLayout(widget)
+
+        config_widget, self.hashcat_controls = self._create_hashcat_config_widget()
+        main_layout.addWidget(config_widget)
 
         # --- Action Buttons & Output ---
         buttons_layout = QHBoxLayout()
-        self.hashcat_start_btn = QPushButton(QIcon("icons/tool.svg"), " Start Hashcat")
-        self.hashcat_stop_btn = QPushButton("Stop Hashcat"); self.hashcat_stop_btn.setEnabled(False)
-        buttons_layout.addWidget(self.hashcat_start_btn)
-        buttons_layout.addWidget(self.hashcat_stop_btn)
+        buttons_layout.addWidget(self.hashcat_controls['start_btn'])
+        buttons_layout.addWidget(self.hashcat_controls['stop_btn'])
         main_layout.addLayout(buttons_layout)
 
         self.hashcat_output_console = QPlainTextEdit()
@@ -4980,29 +5028,49 @@ class Zurvan(QMainWindow):
         self.hashcat_output_console.setFont(QFont("Courier New", 10))
         main_layout.addWidget(self.hashcat_output_console, 1)
 
-        self.hashcat_start_btn.clicked.connect(self.start_hashcat_scan)
-        self.hashcat_stop_btn.clicked.connect(self.cancel_tool)
+        self.hashcat_controls['start_btn'].clicked.connect(self.start_hashcat_scan)
+        self.hashcat_controls['stop_btn'].clicked.connect(self.cancel_tool)
 
         return widget
 
     def browse_hashcat_hashfile(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Hash File", "", "All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
         if file_path:
-            self.hashcat_hashfile_edit.setText(file_path)
+            if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "hashcat_output_console"):
+                 self.hashcat_controls['hashfile_edit'].setText(file_path)
+            else:
+                for tool_name, config_data in self.lab_tool_configs.items():
+                    if config_data['widget'].isVisible() and tool_name == "Hashcat":
+                        config_data['controls']['hashfile_edit'].setText(file_path)
+                        break
 
     def browse_hashcat_wordlist(self):
         file_paths, _ = QFileDialog.getOpenFileNames(self, "Select Wordlist(s)", "", "Text Files (*.txt);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
-        for file_path in file_paths:
-            if file_path:
-                self.hashcat_wordlist_list.addItem(file_path)
+        if not file_paths:
+            return
+
+        if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "hashcat_output_console"):
+            for path in file_paths: self.hashcat_controls['wordlist_list'].addItem(path)
+        else:
+            for tool_name, config_data in self.lab_tool_configs.items():
+                if config_data['widget'].isVisible() and tool_name == "Hashcat":
+                    for path in file_paths: config_data['controls']['wordlist_list'].addItem(path)
+                    break
 
     def browse_hashcat_outfile(self):
         file_path, _ = QFileDialog.getSaveFileName(self, "Save Output File", "", "Text Files (*.txt);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
         if file_path:
-            self.hashcat_outfile_edit.setText(file_path)
+            if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "hashcat_output_console"):
+                 self.hashcat_controls['outfile_edit'].setText(file_path)
+            else:
+                for tool_name, config_data in self.lab_tool_configs.items():
+                    if config_data['widget'].isVisible() and tool_name == "Hashcat":
+                        config_data['controls']['outfile_edit'].setText(file_path)
+                        break
 
     def start_hashcat_scan(self):
         """Starts the Hashcat worker thread."""
+        controls = self.hashcat_controls
         if not shutil.which("hashcat"):
             QMessageBox.critical(self, "Hashcat Error", "'hashcat' command not found. Please ensure it is installed and in your system's PATH.")
             return
@@ -5014,48 +5082,48 @@ class Zurvan(QMainWindow):
         command = ["hashcat"]
 
         # --- Config Tab ---
-        hashfile = self.hashcat_hashfile_edit.text().strip()
+        hashfile = controls['hashfile_edit'].text().strip()
         if not hashfile:
             QMessageBox.critical(self, "Input Error", "Hash file is required.")
             return
         command.append(hashfile)
 
-        hash_type = self.hashcat_type_edit.text().strip()
+        hash_type = controls['type_edit'].text().strip()
         if not hash_type:
             QMessageBox.critical(self, "Input Error", "Hash mode (-m) is required.")
             return
         command.extend(["-m", hash_type])
 
-        attack_mode = self.hashcat_attack_mode_combo.currentText().split(" ")[0]
+        attack_mode = controls['attack_mode_combo'].currentText().split(" ")[0]
         command.extend(["-a", attack_mode])
 
-        if outfile := self.hashcat_outfile_edit.text().strip():
+        if outfile := controls['outfile_edit'].text().strip():
             command.extend(["-o", outfile])
 
         # --- Wordlist/Mask Tabs ---
-        if self.hashcat_wordlist_tab.isEnabled():
-            wordlists = [self.hashcat_wordlist_list.item(i).text() for i in range(self.hashcat_wordlist_list.count())]
+        if controls['wordlist_tab'].isEnabled():
+            wordlists = [controls['wordlist_list'].item(i).text() for i in range(controls['wordlist_list'].count())]
             if not wordlists:
                 QMessageBox.critical(self, "Input Error", "This attack mode requires at least one wordlist.")
                 return
             command.extend(wordlists)
 
-        if self.hashcat_mask_tab.isEnabled():
-            mask = self.hashcat_mask_edit.text().strip()
+        if controls['mask_tab'].isEnabled():
+            mask = controls['mask_edit'].text().strip()
             if not mask:
                 QMessageBox.critical(self, "Input Error", "This attack mode requires a mask.")
                 return
             command.append(mask)
 
         # --- Advanced Tab ---
-        if self.hashcat_force_check.isChecked():
+        if controls['force_check'].isChecked():
             command.append("--force")
-        if extra_opts := self.hashcat_extra_opts_edit.text().strip():
+        if extra_opts := controls['extra_opts_edit'].text().strip():
             command.extend(extra_opts.split())
 
         self.is_tool_running = True
-        self.hashcat_start_btn.setEnabled(False)
-        self.hashcat_stop_btn.setEnabled(True)
+        controls['start_btn'].setEnabled(False)
+        controls['stop_btn'].setEnabled(True)
         self.tool_stop_event.clear()
         self.hashcat_output_console.clear()
 
@@ -6147,6 +6215,47 @@ class Zurvan(QMainWindow):
         self.spiderfoot_output_console.insertPlainText(line)
         self.spiderfoot_output_console.verticalScrollBar().setValue(self.spiderfoot_output_console.verticalScrollBar().maximum())
 
+    def _create_masscan_config_widget(self):
+        """Creates a reusable, self-contained widget with Masscan's configuration options."""
+        widget = QGroupBox("Scan Options")
+        controls_layout = QFormLayout(widget)
+        controls = {}
+
+        controls['target_edit'] = QLineEdit("0.0.0.0/0")
+        controls['target_edit'].setToolTip("Enter target IP ranges (e.g., 10.0.0.0/8, 192.168.0.1-192.168.0.254).")
+        controls_layout.addRow("Target(s):", controls['target_edit'])
+
+        ports_layout = QHBoxLayout()
+        controls['ports_edit'] = QLineEdit("0-65535")
+        controls['ports_edit'].setToolTip("Specify ports to scan (e.g., 80,443, 0-65535).")
+        ports_layout.addWidget(controls['ports_edit'])
+        common_ports_btn = QPushButton("Common Ports")
+        common_ports_btn.clicked.connect(lambda: controls['ports_edit'].setText("21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080"))
+        ports_layout.addWidget(common_ports_btn)
+        controls_layout.addRow("Ports:", ports_layout)
+
+        controls['rate_edit'] = QLineEdit("1000")
+        controls['rate_edit'].setToolTip("Set the transmission rate in packets/second.")
+        controls_layout.addRow("Rate (--rate):", controls['rate_edit'])
+
+        outfile_layout = QHBoxLayout()
+        controls['outfile_edit'] = QLineEdit()
+        controls['outfile_edit'].setPlaceholderText("Optional: path to save report...")
+        outfile_layout.addWidget(controls['outfile_edit'])
+        browse_out_btn = QPushButton("Browse...")
+        browse_out_btn.clicked.connect(self.browse_masscan_outfile)
+        outfile_layout.addWidget(browse_out_btn)
+        controls_layout.addRow("Output File (-oJ):", outfile_layout)
+
+        controls['extra_opts_edit'] = QLineEdit()
+        controls['extra_opts_edit'].setToolTip("Enter any additional, space-separated Masscan flags here.")
+        controls_layout.addRow("Additional Options:", controls['extra_opts_edit'])
+
+        controls['start_btn'] = QPushButton(QIcon("icons/search.svg"), " Start Masscan")
+        controls['stop_btn'] = QPushButton("Stop Masscan"); controls['stop_btn'].setEnabled(False)
+
+        return widget, controls
+
     def _create_masscan_tool(self):
         """Creates the UI for the Masscan tool."""
         widget = QWidget()
@@ -6163,47 +6272,13 @@ class Zurvan(QMainWindow):
         main_layout.addWidget(instructions)
 
         # --- Controls ---
-        controls_frame = QGroupBox("Scan Options")
-        controls_layout = QFormLayout(controls_frame)
-
-        self.masscan_target_edit = QLineEdit("0.0.0.0/0")
-        self.masscan_target_edit.setToolTip("Enter target IP ranges (e.g., 10.0.0.0/8, 192.168.0.1-192.168.0.254).")
-        controls_layout.addRow("Target(s):", self.masscan_target_edit)
-
-        ports_layout = QHBoxLayout()
-        self.masscan_ports_edit = QLineEdit("0-65535")
-        self.masscan_ports_edit.setToolTip("Specify ports to scan (e.g., 80,443, 0-65535).")
-        ports_layout.addWidget(self.masscan_ports_edit)
-        common_ports_btn = QPushButton("Common Ports")
-        common_ports_btn.clicked.connect(lambda: self.masscan_ports_edit.setText("21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080"))
-        ports_layout.addWidget(common_ports_btn)
-        controls_layout.addRow("Ports:", ports_layout)
-
-        self.masscan_rate_edit = QLineEdit("1000")
-        self.masscan_rate_edit.setToolTip("Set the transmission rate in packets/second.")
-        controls_layout.addRow("Rate (--rate):", self.masscan_rate_edit)
-
-        outfile_layout = QHBoxLayout()
-        self.masscan_outfile_edit = QLineEdit()
-        self.masscan_outfile_edit.setPlaceholderText("Optional: path to save report...")
-        outfile_layout.addWidget(self.masscan_outfile_edit)
-        browse_out_btn = QPushButton("Browse...")
-        browse_out_btn.clicked.connect(self.browse_masscan_outfile)
-        outfile_layout.addWidget(browse_out_btn)
-        controls_layout.addRow("Output File (-oJ):", outfile_layout) # Default to JSON for easy parsing
-
-        self.masscan_extra_opts_edit = QLineEdit()
-        self.masscan_extra_opts_edit.setToolTip("Enter any additional, space-separated Masscan flags here.")
-        controls_layout.addRow("Additional Options:", self.masscan_extra_opts_edit)
-
+        controls_frame, self.masscan_controls = self._create_masscan_config_widget()
         main_layout.addWidget(controls_frame)
 
         # --- Action Buttons ---
         buttons_layout = QHBoxLayout()
-        self.masscan_start_btn = QPushButton(QIcon("icons/search.svg"), " Start Masscan")
-        self.masscan_stop_btn = QPushButton("Stop Masscan"); self.masscan_stop_btn.setEnabled(False)
-        buttons_layout.addWidget(self.masscan_start_btn)
-        buttons_layout.addWidget(self.masscan_stop_btn)
+        buttons_layout.addWidget(self.masscan_controls['start_btn'])
+        buttons_layout.addWidget(self.masscan_controls['stop_btn'])
         main_layout.addLayout(buttons_layout)
 
         # --- Output Console ---
@@ -6213,18 +6288,26 @@ class Zurvan(QMainWindow):
         self.masscan_output_console.setPlaceholderText("Masscan output will be displayed here... (Note: Masscan primarily outputs to stderr)")
         main_layout.addWidget(self.masscan_output_console, 1)
 
-        self.masscan_start_btn.clicked.connect(self.start_masscan_scan)
-        self.masscan_stop_btn.clicked.connect(self.cancel_tool)
+        self.masscan_controls['start_btn'].clicked.connect(self.start_masscan_scan)
+        self.masscan_controls['stop_btn'].clicked.connect(self.cancel_tool)
 
         return widget
 
     def browse_masscan_outfile(self):
         file_path, _ = QFileDialog.getSaveFileName(self, "Save Masscan Report", "", "JSON files (*.json);;All Files (*)", options=QFileDialog.Option.DontUseNativeDialog)
         if file_path:
-            self.masscan_outfile_edit.setText(file_path)
+            # This needs to work for both the main tab and the LAB tab instance
+            if self.tab_widget.currentWidget().findChild(QPlainTextEdit, "masscan_output_console"):
+                 self.masscan_controls['outfile_edit'].setText(file_path)
+            else: # We are in the LAB tab, find the active config widget
+                for tool_name, config_data in self.lab_tool_configs.items():
+                    if config_data['widget'].isVisible():
+                        config_data['controls']['outfile_edit'].setText(file_path)
+                        break
 
     def start_masscan_scan(self, sudo_password=None):
         """Starts the Masscan worker thread, prompting for sudo if necessary."""
+        controls = self.masscan_controls
         if not shutil.which("masscan"):
             QMessageBox.critical(self, "Masscan Error", "'masscan' command not found. Please ensure it is installed and in your system's PATH.")
             return
@@ -6233,9 +6316,9 @@ class Zurvan(QMainWindow):
             QMessageBox.warning(self, "Busy", "Another tool is already running.")
             return
 
-        target = self.masscan_target_edit.text().strip()
-        ports = self.masscan_ports_edit.text().strip()
-        rate = self.masscan_rate_edit.text().strip()
+        target = controls['target_edit'].text().strip()
+        ports = controls['ports_edit'].text().strip()
+        rate = controls['rate_edit'].text().strip()
 
         if not target or not ports or not rate:
             QMessageBox.critical(self, "Input Error", "Target, Ports, and Rate are required.")
@@ -6243,10 +6326,10 @@ class Zurvan(QMainWindow):
 
         command = ["masscan", target, "-p", ports, "--rate", rate]
 
-        if outfile := self.masscan_outfile_edit.text().strip():
+        if outfile := controls['outfile_edit'].text().strip():
             command.extend(["-oJ", outfile])
 
-        if extra_opts := self.masscan_extra_opts_edit.text().strip():
+        if extra_opts := controls['extra_opts_edit'].text().strip():
             command.extend(extra_opts.split())
 
         # Masscan always needs root on non-Windows systems.
@@ -6254,15 +6337,15 @@ class Zurvan(QMainWindow):
             # Add a specific check to the sudo prompter to re-enable the right buttons on cancel
             if 'masscan_scan' not in self.sudo_cancel_handlers:
                 self.sudo_cancel_handlers['masscan_scan'] = lambda: (
-                    self.masscan_start_btn.setEnabled(True),
-                    self.masscan_stop_btn.setEnabled(False)
+                    controls['start_btn'].setEnabled(True),
+                    controls['stop_btn'].setEnabled(False)
                 )
             self._run_command_with_sudo_prompt(command, self.start_masscan_scan, 'masscan_scan')
             return
 
         self.is_tool_running = True
-        self.masscan_start_btn.setEnabled(False)
-        self.masscan_stop_btn.setEnabled(True)
+        controls['start_btn'].setEnabled(False)
+        controls['stop_btn'].setEnabled(True)
         self.tool_stop_event.clear()
         self.masscan_output_console.clear()
 
@@ -7295,6 +7378,33 @@ class Zurvan(QMainWindow):
 
         return widget
 
+    def _create_wifite_config_widget(self):
+        """Creates a reusable, self-contained widget with Wifite's configuration options."""
+        widget = QGroupBox("Wifite Options")
+        controls_layout = QFormLayout(widget)
+        controls = {}
+
+        controls['essid_edit'] = QLineEdit()
+        controls['essid_edit'].setPlaceholderText("Leave blank for an attack on all networks")
+        controls_layout.addRow("Target ESSID:", controls['essid_edit'])
+
+        options_layout = QHBoxLayout()
+        controls['wps_check'] = QCheckBox("WPS Attacks (--wps)")
+        controls['pmkid_check'] = QCheckBox("PMKID Attacks (--pmkid)")
+        controls['kill_check'] = QCheckBox("Kill Conflicting Processes (--kill)")
+        controls['wps_check'].setToolTip("Run only WPS attacks.")
+        controls['pmkid_check'].setToolTip("Run only PMKID attacks.")
+        controls['kill_check'].setToolTip("Kill processes that interfere with monitor mode.")
+        options_layout.addWidget(controls['wps_check'])
+        options_layout.addWidget(controls['pmkid_check'])
+        options_layout.addWidget(controls['kill_check'])
+        controls_layout.addRow("Attack Types:", options_layout)
+
+        controls['start_btn'] = QPushButton(QIcon("icons/wifi.svg"), " Start Wifite Scan")
+        controls['stop_btn'] = QPushButton("Stop Wifite"); controls['stop_btn'].setEnabled(False)
+
+        return widget, controls
+
     def _create_wifite_tool(self):
         """Creates the UI for the Wifite automated wireless auditor."""
         widget = QWidget()
@@ -7311,33 +7421,13 @@ class Zurvan(QMainWindow):
         layout.addWidget(instructions)
 
         # --- Controls ---
-        controls_frame = QGroupBox("Wifite Options")
-        controls_layout = QFormLayout(controls_frame)
-
-        self.wifite_essid_edit = QLineEdit()
-        self.wifite_essid_edit.setPlaceholderText("Leave blank for an attack on all networks")
-        controls_layout.addRow("Target ESSID:", self.wifite_essid_edit)
-
-        options_layout = QHBoxLayout()
-        self.wifite_wps_check = QCheckBox("WPS Attacks (--wps)")
-        self.wifite_pmkid_check = QCheckBox("PMKID Attacks (--pmkid)")
-        self.wifite_kill_check = QCheckBox("Kill Conflicting Processes (--kill)")
-        self.wifite_wps_check.setToolTip("Run only WPS attacks.")
-        self.wifite_pmkid_check.setToolTip("Run only PMKID attacks.")
-        self.wifite_kill_check.setToolTip("Kill processes that interfere with monitor mode.")
-        options_layout.addWidget(self.wifite_wps_check)
-        options_layout.addWidget(self.wifite_pmkid_check)
-        options_layout.addWidget(self.wifite_kill_check)
-        controls_layout.addRow("Attack Types:", options_layout)
-
+        controls_frame, self.wifite_controls = self._create_wifite_config_widget()
         layout.addWidget(controls_frame)
 
         # --- Action Buttons ---
         buttons_layout = QHBoxLayout()
-        self.wifite_start_btn = QPushButton(QIcon("icons/wifi.svg"), " Start Wifite Scan")
-        self.wifite_stop_btn = QPushButton("Stop Wifite"); self.wifite_stop_btn.setEnabled(False)
-        buttons_layout.addWidget(self.wifite_start_btn)
-        buttons_layout.addWidget(self.wifite_stop_btn)
+        buttons_layout.addWidget(self.wifite_controls['start_btn'])
+        buttons_layout.addWidget(self.wifite_controls['stop_btn'])
         layout.addLayout(buttons_layout)
 
         # --- Output Console ---
@@ -7347,13 +7437,14 @@ class Zurvan(QMainWindow):
         self.wifite_output_console.setPlaceholderText("Wifite output will be displayed here...")
         layout.addWidget(self.wifite_output_console, 1) # Add stretch factor
 
-        self.wifite_start_btn.clicked.connect(self.start_wifite_scan)
-        self.wifite_stop_btn.clicked.connect(self.cancel_tool)
+        self.wifite_controls['start_btn'].clicked.connect(self.start_wifite_scan)
+        self.wifite_controls['stop_btn'].clicked.connect(self.cancel_tool)
 
         return widget
 
     def start_wifite_scan(self, sudo_password=None):
         """Starts the Wifite scan worker thread, prompting for sudo if necessary."""
+        controls = self.wifite_controls
         if not shutil.which("wifite"):
             QMessageBox.critical(self, "Wifite Error", "'wifite' command not found. Please ensure it is installed and in your system's PATH.")
             return
@@ -7368,15 +7459,15 @@ class Zurvan(QMainWindow):
             return
 
         command = ["wifite", "-i", iface]
-        essid = self.wifite_essid_edit.text().strip()
+        essid = controls['essid_edit'].text().strip()
         if essid:
             command.extend(["--essid", essid])
 
-        if self.wifite_wps_check.isChecked():
+        if controls['wps_check'].isChecked():
             command.append("--wps")
-        if self.wifite_pmkid_check.isChecked():
+        if controls['pmkid_check'].isChecked():
             command.append("--pmkid")
-        if self.wifite_kill_check.isChecked():
+        if controls['kill_check'].isChecked():
             command.append("--kill")
 
         # Wifite always needs root on non-Windows systems.
@@ -7384,15 +7475,15 @@ class Zurvan(QMainWindow):
             # Add a specific check to the sudo prompter to re-enable the right buttons on cancel
             if 'wifite_scan' not in self.sudo_cancel_handlers:
                 self.sudo_cancel_handlers['wifite_scan'] = lambda: (
-                    self.wifite_start_btn.setEnabled(True),
-                    self.wifite_stop_btn.setEnabled(False)
+                    controls['start_btn'].setEnabled(True),
+                    controls['stop_btn'].setEnabled(False)
                 )
             self._run_command_with_sudo_prompt(command, self.start_wifite_scan, 'wifite_scan')
             return
 
         self.is_tool_running = True
-        self.wifite_start_btn.setEnabled(False)
-        self.wifite_stop_btn.setEnabled(True)
+        controls['start_btn'].setEnabled(False)
+        controls['stop_btn'].setEnabled(True)
         self.tool_stop_event.clear()
         self.wifite_output_console.clear()
 
@@ -10535,6 +10626,8 @@ class Zurvan(QMainWindow):
                                      QMessageBox.StandardButton.No)
 
         if reply == QMessageBox.StandardButton.Yes:
+            if self.current_user:
+                database.log_login_event(self.current_user.get('username'), 'Logout (Window Closed)', self.current_user.get('id'))
             logging.info("User confirmed exit. Stopping background threads.")
             if self.sniffer_thread and self.sniffer_thread.isRunning(): self.sniffer_thread.stop()
             if self.channel_hopper and self.channel_hopper.isRunning(): self.channel_hopper.stop()
@@ -10660,7 +10753,11 @@ class Zurvan(QMainWindow):
         ai_box = QGroupBox("AI-Powered Generation")
         ai_layout = QFormLayout(ai_box)
         self.ai_persona_combo = QComboBox()
-        self.ai_persona_combo.addItems(["Default", "Technical Manager", "C-Suite Executive", "Lead Developer"])
+        self.ai_persona_combo.addItems([
+            "Default", "Cybersecurity Analyst", "Penetration Tester", "Incident Responder",
+            "Malware Analyst", "Threat Hunter", "Security Auditor", "Network Engineer",
+            "Technical Manager", "C-Suite Executive (CSO/CISO)", "Lead Developer (DevSecOps)"
+        ])
         self.ai_persona_combo.setToolTip("Select a persona for the AI to adopt when generating report sections.")
         ai_layout.addRow("AI Persona:", self.ai_persona_combo)
 
@@ -10674,6 +10771,17 @@ class Zurvan(QMainWindow):
         self.report_generate_ai_btn.clicked.connect(self._handle_ai_report_generation)
         ai_layout.addRow(self.report_generate_ai_btn)
         generation_layout.addWidget(ai_box)
+
+        # --- Template Examples ---
+        template_box = QGroupBox("Template Examples")
+        template_layout = QHBoxLayout(template_box)
+        self.load_roe_btn = QPushButton("Load ROE Template")
+        self.load_roe_btn.setToolTip("Populate the ROE fields with a standard template.")
+        self.load_example_report_btn = QPushButton("Load Example Report")
+        self.load_example_report_btn.setToolTip("Populate the main fields with an example report for guidance.")
+        template_layout.addWidget(self.load_roe_btn)
+        template_layout.addWidget(self.load_example_report_btn)
+        generation_layout.addWidget(template_box)
 
         # --- Final Report Generation ---
         final_report_box = QGroupBox("Final Export")
@@ -10720,7 +10828,68 @@ class Zurvan(QMainWindow):
         main_splitter.setSizes([400, 600]) # Initial sizing
         main_layout.addWidget(main_splitter)
 
+        # --- Connections for new buttons ---
+        self.load_roe_btn.clicked.connect(self._load_roe_template)
+        self.load_example_report_btn.clicked.connect(self._load_example_report)
+
         return widget
+
+    def _load_roe_template(self):
+        """Populates the ROE fields with a standardized template."""
+        if self.report_objectives.toPlainText() or self.report_in_scope.toPlainText() or self.report_out_of_scope.toPlainText():
+            reply = QMessageBox.question(self, "Confirm Overwrite",
+                                         "This will overwrite the current ROE fields. Are you sure?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                         QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        self.report_objectives.setPlainText(
+"""- Objective 1: Identify and assess vulnerabilities in the external network perimeter.
+- Objective 2: Determine if a threat actor can gain unauthorized access to internal systems.
+- Objective 3: Evaluate the effectiveness of current security controls and monitoring."""
+        )
+        self.report_in_scope.setPlainText(
+"""--- Authorized Target Space ---
+- IP Range(s): [e.g., 1.2.3.0/24]
+- Domains: *.example-company.com
+- Applications: Main Web Application (www.example-company.com)
+
+--- Authorized Hosts ---
+- All hosts within the specified IP range unless explicitly restricted."""
+        )
+        self.report_out_of_scope.setPlainText(
+"""--- Explicit Restrictions ---
+- No intentional Denial of Service (DoS) or activities likely to cause service degradation.
+- Testing is restricted to the hours of 10:00 PM to 6:00 AM UTC.
+- Social engineering of company staff is not permitted.
+
+--- Restricted Hosts ---
+- payroll.example-company.com
+- hr.example-company.com"""
+        )
+        QMessageBox.information(self, "Template Loaded", "ROE template has been loaded into the fields.")
+
+    def _load_example_report(self):
+        """Populates the main report fields with example content."""
+        if self.report_summary_text.toPlainText():
+            reply = QMessageBox.question(self, "Confirm Overwrite",
+                                         "This will overwrite the Executive Summary. Are you sure?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                         QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        self.report_client_name.setText("Example-Company Inc.")
+        self.report_assessment_dates.setText(f"{datetime.now().year}-01-01 to {datetime.now().year}-01-07")
+        self.report_summary_text.setPlainText(
+"""This report details the findings of a penetration test conducted against Example-Company's external network from [Start Date] to [End Date]. The primary objective was to identify vulnerabilities that could be exploited by an external attacker to compromise the network and access sensitive data.
+
+During the assessment, several high-risk vulnerabilities were discovered, including an unpatched web server susceptible to remote code execution and a misconfigured firewall allowing unauthorized access to an internal development server. These findings indicate a significant risk of a full network compromise.
+
+Key recommendations include immediately patching the vulnerable web server, correcting the firewall misconfiguration, and implementing a comprehensive vulnerability management program. A detailed breakdown of all findings and their technical remediation steps is provided in the body of this report."""
+        )
+        QMessageBox.information(self, "Example Loaded", "Example report summary has been loaded.")
 
     def _handle_ai_summary_generation(self):
         """Gathers findings, sends them to the AI, and sets a callback to populate the summary."""
@@ -10824,13 +10993,18 @@ class Zurvan(QMainWindow):
             ("fierce", self._create_fierce_config_widget),
             ("Nikto Scan", self._create_nikto_config_widget),
             ("Gobuster", self._create_gobuster_config_widget),
+            ("WhatWeb", self._create_whatweb_config_widget),
+            ("Masscan", self._create_masscan_config_widget),
+            ("SQLMap", self._create_sqlmap_config_widget),
+            ("Hashcat", self._create_hashcat_config_widget),
             ("Nuclei Scanner", self._create_nuclei_config_widget),
             ("TruffleHog Scanner", self._create_trufflehog_config_widget),
             ("John the Ripper", self._create_jtr_config_widget),
             ("Hydra", self._create_hydra_config_widget),
             ("Sherlock", self._create_sherlock_config_widget),
             ("Spiderfoot", self._create_spiderfoot_config_widget),
-            ("ARP Scan (CLI)", self._create_arp_scan_cli_config_widget)
+            ("ARP Scan (CLI)", self._create_arp_scan_cli_config_widget),
+            ("Wifite Auditor", self._create_wifite_config_widget)
         ]
 
         for name, config_method in compatible_tools:
