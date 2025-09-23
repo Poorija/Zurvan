@@ -2356,6 +2356,7 @@ class Zurvan(QMainWindow):
             return False
 
         lock_dialog = AppLockDialog(
+            username=user_data.get('username'),
             unlock_method=unlock_method,
             verification_callback=verification_callback,
             parent=self
