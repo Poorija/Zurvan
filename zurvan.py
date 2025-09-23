@@ -2111,6 +2111,24 @@ class Zurvan(QMainWindow):
     def _handle_unlock_method_change(self, action):
         """Handles when the user changes the unlock method."""
         method = "pin" if "pin" in action.text().lower() else "password"
+
+        if self.current_user and method == "pin":
+            # Check if a PIN is actually set before allowing the change
+            user_data = database.get_user_by_id(self.current_user['id'])
+            if not user_data.get('pin_hash'):
+                QMessageBox.warning(self, "PIN Not Set",
+                                    "You have not configured a PIN for your account.\n\n"
+                                    "Please go to Profile -> Set PIN to create one before enabling this feature.")
+                # Revert the selection back to password
+                for act in self.app_unlock_method_group.actions():
+                    if "password" in act.text().lower():
+                        # block signals to prevent recursion
+                        act.blockSignals(True)
+                        act.setChecked(True)
+                        act.blockSignals(False)
+                        break
+                return # Stop processing
+
         logging.info(f"App unlock method changed to: {method}")
         # Save to DB
         if self.current_user:
@@ -2144,10 +2162,12 @@ class Zurvan(QMainWindow):
             return False
 
         lock_dialog = AppLockDialog(
+            username=user_data.get('username'),
             unlock_method=unlock_method,
             verification_callback=verification_callback,
             parent=self
         )
+        lock_dialog.exec()
 
     def _create_header_bar(self):
         """Creates the top header bar with interface and theme selectors."""
