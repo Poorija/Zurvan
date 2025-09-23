@@ -2210,7 +2210,6 @@ class Zurvan(QMainWindow):
         if self.current_user:
             database.update_user_app_lock_settings(self.current_user['id'], self.app_lock_timeout_minutes, method)
 
-
     def _handle_theme_change(self, theme_name):
         theme_file = f"{theme_name}.xml"
         invert_secondary = "light" in theme_name
