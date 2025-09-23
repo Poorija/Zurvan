@@ -214,8 +214,13 @@ def verify_user(username, password, is_status_check=False):
         conn.close()
         return None
 
-def register_failed_login_attempt(username, cursor):
-    """Implements the progressive lockout logic. Requires an existing cursor."""
+def register_failed_login_attempt(username, cursor=None):
+    """Implements the progressive lockout logic. Can use an existing cursor or create a new connection."""
+    conn = None
+    if cursor is None:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
     cursor.execute("SELECT id, failed_login_attempts, lockout_level FROM users WHERE username = ? AND is_active = 1", (username,))
     user = cursor.fetchone()
 
@@ -248,6 +253,10 @@ def register_failed_login_attempt(username, cursor):
         else:
             # Just increment the attempt counter if it's below the threshold
             cursor.execute("UPDATE users SET failed_login_attempts = ? WHERE id = ?", (new_attempts, user_id))
+
+    if conn:
+        conn.commit()
+        conn.close()
 
 def clear_login_attempts(user_id):
     """Resets failed login attempts and lockout level for a user upon successful login."""
