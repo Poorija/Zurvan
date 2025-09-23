@@ -2094,29 +2094,29 @@ class Zurvan(QMainWindow):
         lock_menu.addSeparator()
 
         auto_lock_menu = lock_menu.addMenu("Auto-lock delay")
-        auto_lock_group = QActionGroup(self)
-        auto_lock_group.setExclusive(True)
+        self.app_lock_timeout_group = QActionGroup(self)
+        self.app_lock_timeout_group.setExclusive(True)
 
         timeouts = {"5 Minutes": 5, "15 Minutes": 15, "30 Minutes": 30, "1 Hour": 60, "Disabled": 0}
         for text, minutes in timeouts.items():
             action = QAction(text, self, checkable=True)
             action.setData(minutes)
-            auto_lock_group.addAction(action)
+            self.app_lock_timeout_group.addAction(action)
             auto_lock_menu.addAction(action)
             if minutes == 15: # Default
                 action.setChecked(True)
 
         lock_menu.addSeparator()
         unlock_method_menu = lock_menu.addMenu("Unlock Method")
-        unlock_method_group = QActionGroup(self)
-        unlock_method_group.setExclusive(True)
+        self.app_unlock_method_group = QActionGroup(self)
+        self.app_unlock_method_group.setExclusive(True)
 
         pass_action = QAction("Use Password", self, checkable=True)
         pass_action.setChecked(True)
         pin_action = QAction("Use PIN", self, checkable=True)
 
-        unlock_method_group.addAction(pass_action)
-        unlock_method_group.addAction(pin_action)
+        self.app_unlock_method_group.addAction(pass_action)
+        self.app_unlock_method_group.addAction(pin_action)
         unlock_method_menu.addAction(pass_action)
         unlock_method_menu.addAction(pin_action)
 
@@ -2136,10 +2136,7 @@ class Zurvan(QMainWindow):
         self.tor_proxy_check.toggled.connect(self._handle_tor_toggle)
 
         # Connect App Lock signals
-        self.app_lock_timeout_group = self.app_lock_button.menu().findChild(QActionGroup)
         self.app_lock_timeout_group.triggered.connect(self._handle_auto_lock_change)
-
-        self.app_unlock_method_group = self.app_lock_button.menu().findChildren(QActionGroup)[1]
         self.app_unlock_method_group.triggered.connect(self._handle_unlock_method_change)
 
     def _setup_app_lock_monitor(self):
