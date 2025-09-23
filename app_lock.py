@@ -1,52 +1,80 @@
 import os
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QFrame
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFrame, QStackedWidget
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QSize
+from PyQt6.QtGui import QIcon, QPixmap, QFont
 
 class AppLockDialog(QDialog):
     """
     A modal, full-screen dialog that locks the application until the correct
-    password or PIN is entered.
+    password or PIN is entered. Features a two-stage unlock process.
     """
-    def __init__(self, unlock_method, verification_callback, parent=None):
+    def __init__(self, username, unlock_method, verification_callback, parent=None):
         super().__init__(parent)
         self.verification_callback = verification_callback
         self.unlock_method = unlock_method
+        self.username = username
 
         # --- Window Properties ---
         self.setWindowTitle("Zurvan - Locked")
-        # Cover the parent window's area
         self.setGeometry(parent.geometry())
-        # Stay on top, be modal, and have no frame
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setModal(True)
 
-        # --- UI Elements ---
+        # --- Main Layout ---
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Use a central frame for styling and content
+        # --- Stacked Widget for different views ---
+        self.stack = QStackedWidget(self)
+        self.main_layout.addWidget(self.stack)
+
+        # --- Create and add views ---
+        self._create_initial_view()
+        self._create_unlock_view()
+
+        self._apply_stylesheet()
+        self.stack.setCurrentIndex(0)
+
+    def _create_initial_view(self):
+        """Creates the initial view with the logo and username."""
+        initial_widget = QWidget()
+        layout = QVBoxLayout(initial_widget)
+        layout.setSpacing(20)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Full-screen logo
+        logo_label = QLabel()
+        pixmap = QPixmap(os.path.join("icons", "Zurvan.png"))
+        logo_label.setPixmap(pixmap.scaled(QSize(256, 256), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(logo_label)
+
+        # Username button
+        self.username_button = QPushButton(self.username)
+        self.username_button.setObjectName("usernameButton")
+        self.username_button.setMinimumHeight(40)
+        self.username_button.clicked.connect(lambda: self.stack.setCurrentIndex(1))
+        layout.addWidget(self.username_button)
+
+        self.stack.addWidget(initial_widget)
+
+    def _create_unlock_view(self):
+        """Creates the view with the input field for password/PIN."""
         self.central_frame = QFrame(self)
         self.central_frame.setObjectName("centralFrame")
-        self.central_frame.setMaximumSize(350, 200) # Set a max size for the content box
+        self.central_frame.setMaximumSize(350, 220)
 
         frame_layout = QVBoxLayout(self.central_frame)
         frame_layout.setSpacing(15)
         frame_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Lock Icon and Title
-        title_layout = QHBoxLayout()
-        lock_icon = QLabel()
-        icon_path = os.path.join(os.path.dirname(__file__), 'icons', 'lock.svg')
-        lock_icon.setPixmap(QIcon(icon_path).pixmap(32, 32))
-        title_label = QLabel("Application Locked")
+        # Title
+        title_label = QLabel(f"Welcome, {self.username}")
         title_label.setObjectName("titleLabel")
-        title_layout.addWidget(lock_icon)
-        title_layout.addWidget(title_label)
-        title_layout.addStretch()
-        frame_layout.addLayout(title_layout)
+        frame_layout.addWidget(title_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         # Input field
         self.input_edit = QLineEdit(self)
@@ -55,20 +83,37 @@ class AppLockDialog(QDialog):
         self.input_edit.returnPressed.connect(self._attempt_unlock)
         frame_layout.addWidget(self.input_edit)
 
-        # Unlock Button
+        # Button layout
+        button_layout = QHBoxLayout()
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setObjectName("cancelButton")
+        self.cancel_button.clicked.connect(lambda: self.stack.setCurrentIndex(0))
+
         self.unlock_button = QPushButton("Unlock")
         self.unlock_button.clicked.connect(self._attempt_unlock)
-        frame_layout.addWidget(self.unlock_button)
 
-        self.main_layout.addWidget(self.central_frame, 0, Qt.AlignmentFlag.AlignCenter)
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addWidget(self.unlock_button)
+        frame_layout.addLayout(button_layout)
 
-        self._apply_stylesheet()
+        self.stack.addWidget(self.central_frame)
 
     def _apply_stylesheet(self):
         """Applies a dark, blurred background style."""
         self.setStyleSheet("""
             AppLockDialog {
-                background-color: rgba(10, 10, 10, 0.85); /* Semi-transparent dark background */
+                background-color: rgba(10, 10, 10, 0.92);
+            }
+            #usernameButton {
+                font-size: 24px;
+                font-weight: bold;
+                color: #ffffff;
+                background-color: transparent;
+                border: none;
+                padding: 10px;
+            }
+            #usernameButton:hover {
+                color: #4a90e2;
             }
             #centralFrame {
                 background-color: #2c313c;
@@ -80,23 +125,32 @@ class AppLockDialog(QDialog):
                 font-size: 18px;
                 font-weight: bold;
                 color: #ffffff;
+                margin-bottom: 10px;
             }
             QLineEdit {
-                padding: 8px;
+                padding: 10px;
                 border-radius: 4px;
                 border: 1px solid #555;
                 background-color: #353b48;
                 color: #f1f1f1;
+                font-size: 14px;
             }
             QPushButton {
-                padding: 8px;
+                padding: 10px;
                 border-radius: 4px;
                 background-color: #4a90e2;
                 color: white;
                 font-weight: bold;
+                border: none;
             }
             QPushButton:hover {
                 background-color: #5fa8ff;
+            }
+            #cancelButton {
+                background-color: #555;
+            }
+            #cancelButton:hover {
+                background-color: #666;
             }
         """)
 
@@ -117,17 +171,21 @@ class AppLockDialog(QDialog):
         """Creates a shake animation for the central frame on failed attempts."""
         anim = QPropertyAnimation(self.central_frame, b"pos")
         pos = self.central_frame.pos()
-        anim.setDuration(300)
+        # The frame is inside the stack, which is centered. We need to get its position relative to the dialog.
+        center_pos = self.rect().center() - self.central_frame.rect().center()
+
+        anim.setDuration(400)
         anim.setLoopCount(1)
-        anim.setKeyValueAt(0.0, pos)
-        anim.setKeyValueAt(0.1, pos + QPoint(10, 0))
-        anim.setKeyValueAt(0.2, pos)
-        anim.setKeyValueAt(0.3, pos + QPoint(-10, 0))
-        anim.setKeyValueAt(0.4, pos)
-        anim.setKeyValueAt(0.5, pos + QPoint(10, 0))
-        anim.setKeyValueAt(0.6, pos)
-        anim.setKeyValueAt(0.7, pos + QPoint(-10, 0))
-        anim.setKeyValueAt(0.8, pos)
-        anim.setKeyValueAt(0.9, pos + QPoint(10, 0))
-        anim.setKeyValueAt(1.0, pos)
+        anim.setEasingCurve(QEasingCurve.Type.Linear)
+        anim.setKeyValueAt(0.0, center_pos)
+        anim.setKeyValueAt(0.1, center_pos + QPoint(10, 0))
+        anim.setKeyValueAt(0.2, center_pos)
+        anim.setKeyValueAt(0.3, center_pos + QPoint(-10, 0))
+        anim.setKeyValueAt(0.4, center_pos)
+        anim.setKeyValueAt(0.5, center_pos + QPoint(10, 0))
+        anim.setKeyValueAt(0.6, center_pos)
+        anim.setKeyValueAt(0.7, center_pos + QPoint(-10, 0))
+        anim.setKeyValueAt(0.8, center_pos)
+        anim.setKeyValueAt(0.9, center_pos + QPoint(10, 0))
+        anim.setKeyValueAt(1.0, center_pos)
         anim.start()
