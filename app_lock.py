@@ -1,9 +1,10 @@
 import os
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFrame, QStackedWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QFrame, QStackedWidget, QWidget
 )
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QSize
 from PyQt6.QtGui import QIcon, QPixmap, QFont
+from PyQt6.QtWidgets import QHBoxLayout, QWidget
 
 class AppLockDialog(QDialog):
     """
