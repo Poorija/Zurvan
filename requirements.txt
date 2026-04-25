@@ -1,0 +1,64 @@
+# Core App Dependencies
+PyQt6
+PyQt6-WebEngine
+qt_material
+numpy
+psutil
+pyotp
+reportlab
+python-docx
+pyqtgraph
+gputil
+scapy
+requests
+colorama
+google
+fuzzywuzzy
+python-Levenshtein
+qrcode
+python-geoip-geolite2
+PyYAML
+speedtest-cli
+paramiko
+cryptography
+dnspython
+
+# Dependencies from theHarvester (with versions)
+aiodns==3.5.0
+aiofiles==24.1.0
+aiohttp==3.12.15
+aiomultiprocess==0.9.1
+aiosqlite==0.21.0
+beautifulsoup4==4.13.5
+censys==2.2.18
+certifi==2025.8.3
+dnspython==2.8.0
+fastapi==0.117.1
+lxml==6.0.1
+netaddr==1.3.0
+playwright==1.55.0
+python-dateutil==2.9.0.post0
+httpx==0.28.1
+retrying==1.4.2
+shodan==1.31.0
+slowapi==0.1.9
+ujson==5.11.0
+uvicorn==0.37.0
+uvloop==0.21.0; platform_system != 'Windows'
+winloop==0.2.2; platform_system == 'Windows'
+
+# Dependencies from Magma-Osint
+googlesearch-python
+requests-html
+folium
+geopy
+style
+rich
+
+# Dependencies from Photon
+tld
+fake-useragent
+
+# Dependencies from Metagoofil
+google
+bs4

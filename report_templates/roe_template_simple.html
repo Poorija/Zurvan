@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rules of Engagement</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; margin: 0; padding: 0; background-color: #f8f9fa; color: #212529; }
+        .container { max-width: 800px; margin: 40px auto; padding: 20px; background-color: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.05); }
+        h1, h2, h3 { color: #343a40; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        h1 { font-size: 2.5em; }
+        h2 { font-size: 2em; margin-top: 40px; }
+        h3 { font-size: 1.5em; border-bottom: 1px solid #ced4da; }
+        .section { margin-bottom: 30px; }
+        .placeholder { color: #888; font-style: italic; background-color: #e9ecef; padding: 2px 6px; border-radius: 4px; }
+        ul { padding-left: 20px; }
+        li { margin-bottom: 10px; }
+        strong { color: #0056b3; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #dee2e6; padding: 12px; text-align: left; }
+        th { background-color: #e9ecef; }
+        .signatures { margin-top: 60px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+        .signature-block { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Rules of Engagement (ROE)</h1>
+        <p><strong>Engagement Date:</strong> <span class="placeholder">{assessment_dates}</span></p>
+        <p><strong>Client:</strong> <span class="placeholder">{client_name}</span></p>
+        <p><strong>Assessor:</strong> <span class="placeholder">{assessor_name}</span></p>
+
+        <div class="section">
+            <h2>1. Purpose & Objectives</h2>
+            <p>This document establishes the guidelines, limitations, and responsibilities for conducting a security assessment. The primary objectives of this engagement are:</p>
+            <div class="placeholder">{objectives}</div>
+        </div>
+
+        <div class="section">
+            <h2>2. Scope of Engagement</h2>
+            <h3>2.1. In-Scope Targets</h3>
+            <p>The following assets, systems, and networks are explicitly <strong>INCLUDED</strong> in the scope of this engagement:</p>
+            <div class="placeholder">{in_scope}</div>
+
+            <h3>2.2. Out-of-Scope Targets & Restrictions</h3>
+            <p>The following assets, systems, and networks are explicitly <strong>EXCLUDED</strong> from the scope of this engagement. Furthermore, the following testing activities are restricted:</p>
+            <div class="placeholder">{out_of_scope}</div>
+        </div>
+
+        <div class="section">
+            <h2>3. Rules of Engagement and Support Agreement</h2>
+            <ul>
+                <li><strong>Confidentiality:</strong> All information discovered during this engagement will be treated as strictly confidential and will only be shared with the authorized points of contact.</li>
+                <li><strong>Data Handling:</strong> The assessor is permitted to exfiltrate data necessary to demonstrate a proof-of-concept for identified vulnerabilities. No sensitive data (e.g., PII, PHI) will be exfiltrated without explicit, written permission from the Client's primary POC.</li>
+                <li><strong>Service Disruption:</strong> While testing may be intrusive, the assessor will make every effort to avoid disruption of services. No intentional Denial of Service (DoS) attacks will be performed unless explicitly included in the scope. If a service disruption is suspected, the assessor will immediately halt testing on the affected asset and contact the emergency POC.</li>
+                <li><strong>Third-Party Systems:</strong> No testing will be performed on third-party systems or services. If a vulnerability in a third-party system is discovered, the assessor will report it to the Client for their own vendor management process.</li>
+                <li><strong>Incident Discovery:</strong> If evidence of a prior or ongoing real-world compromise is discovered, the assessor will immediately pause the engagement and notify the emergency POC.</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>4. Points of Contact</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Role</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Client Primary Contact</td>
+                        <td class="placeholder">{client_poc_name}</td>
+                        <td class="placeholder">{client_poc_email}</td>
+                        <td class="placeholder">{client_poc_phone}</td>
+                    </tr>
+                    <tr>
+                        <td>Client Emergency Contact</td>
+                        <td class="placeholder">{client_emergency_name}</td>
+                        <td class="placeholder">{client_emergency_email}</td>
+                        <td class="placeholder">{client_emergency_phone}</td>
+                    </tr>
+                    <tr>
+                        <td>Assessor Primary Contact</td>
+                        <td class="placeholder">{assessor_poc_name}</td>
+                        <td class="placeholder">{assessor_poc_email}</td>
+                        <td class="placeholder">{assessor_poc_phone}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section signatures">
+            <div class="signature-block">
+                <h3>For the Client:</h3>
+                <br><br>
+                <p>_________________________</p>
+                <p><strong>Name:</strong> <span class="placeholder">(Client Representative Name)</span></p>
+                <p><strong>Title:</strong> <span class="placeholder">(Title)</span></p>
+                <p><strong>Date:</strong> <span class="placeholder">{agreement_date}</span></p>
+            </div>
+            <div class="signature-block">
+                <h3>For the Assessor:</h3>
+                <br><br>
+                <p>_________________________</p>
+                <p><strong>Name:</strong> <span class="placeholder">(Assessor Representative Name)</span></p>
+                <p><strong>Title:</strong> <span class="placeholder">(Title)</span></p>
+                <p><strong>Date:</strong> <span class="placeholder">{agreement_date}</span></p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

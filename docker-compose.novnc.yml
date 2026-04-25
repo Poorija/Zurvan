@@ -1,0 +1,36 @@
+services:
+  zurvan-novnc:
+    build:
+      context: .
+      dockerfile: Dockerfile.novnc
+    image: zurvan:novnc
+    container_name: zurvan-novnc
+    restart: unless-stopped
+    ports:
+      - "6080:6080"
+      - "5900:5900"
+    environment:
+      DISPLAY: ":1"
+      NOVNC_PORT: "6080"
+      VNC_PORT: "5900"
+      VNC_GEOMETRY: "2560x1440"
+      VNC_DEPTH: "24"
+      LIBGL_ALWAYS_SOFTWARE: "1" 
+      QT_X11_NO_MITSHM: "1"
+      QTWEBENGINE_CHROMIUM_FLAGS: "--no-sandbox --disable-dev-shm-usage"
+      ZURVAN_CMD: "python3 /opt/zurvan/zurvan.py"
+    volumes:
+      - zurvan-data:/opt/zurvan/data
+      - zurvan-reports:/opt/zurvan/reports
+      - zurvan-artifacts:/opt/zurvan/artifacts
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - seccomp:unconfined
+    shm_size: "2gb" #
+
+volumes:
+  zurvan-data:
+  zurvan-reports:
+  zurvan-artifacts:

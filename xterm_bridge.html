@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            overflow: hidden;
+        }
+        #terminal {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+
+    <script src="xterm_lib/xterm.min.js"></script>
+    <script src="xterm_lib/xterm-addon-fit.min.js"></script>
+    <link rel="stylesheet" href="xterm_lib/xterm.css" />
+
+    <script src="qwebchannel.js"></script>
+
+</head>
+<body>
+    <div id="terminal"></div>
+<script>
+        var pywebview_bridge = null;
+        const term = new Terminal({
+            cursorBlink: true,
+            rows: 30,
+            cols: 120
+        });
+
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        
+        term.open(document.getElementById('terminal'));
+        
+        fitAddon.fit();
+        
+        window.onresize = () => fitAddon.fit();
+        
+        term.focus();
+
+        window.receiveData = function(data) {
+            term.write(data);
+        }
+
+        term.onData(data => {
+            if (pywebview_bridge) {
+                pywebview_bridge.send(data);
+            }
+        });
+
+        term.onResize(size => {
+            if (pywebview_bridge) {
+                pywebview_bridge.resize(size.cols, size.rows);
+            }
+        });
+
+        console.log("JS: Script loaded.");
+        if (typeof window.QWebChannel === 'undefined') {
+            console.error("JS FATAL: QWebChannel class is not defined! qwebchannel.js failed to load or run.");
+        } else {
+            console.log("JS: QWebChannel class is loaded.");
+        }
+
+        if (typeof qt === 'undefined' || typeof qt.webChannelTransport === 'undefined') {
+            console.error("JS FATAL: qt.webChannelTransport is not defined!");
+        } else {
+            console.log("JS: qt.webChannelTransport is available.");
+        }
+
+        console.log("JS: Attempting QWebChannel connection...");
+        try {
+            new QWebChannel(qt.webChannelTransport, function (channel) {
+                console.log("JS: QWebChannel connection ESTABLISHED!");
+                pywebview_bridge = channel.objects.pywebview;
+
+                if (pywebview_bridge && pywebview_bridge.on_ready_js) {
+                    console.log("JS: Found pywebview_bridge. Calling on_ready_js()...");
+                    pywebview_bridge.on_ready_js();
+                } else {
+                    console.error("JS ERROR: pywebview_bridge or on_ready_js not found!");
+                }
+            });
+        } catch (e) {
+            console.error("JS CRITICAL: 'new QWebChannel' call FAILED with exception:", e);
+        }
+    </script>
+</body>
+</html>
