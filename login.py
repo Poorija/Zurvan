@@ -209,7 +209,8 @@ class PasswordResetDialog(QDialog):
             QMessageBox.information(self, "Success", "Your password has been reset successfully. You can now log in.")
             self.accept() # Close the reset dialog
         except Exception as e:
-            QMessageBox.critical(self, "Database Error", f"An unexpected error occurred while updating the password: {e}")
+            logging.error(f"Error updating password: {e}", exc_info=True)
+            QMessageBox.critical(self, "Database Error", "An unexpected error occurred while updating the password. Please try again later.")
 
 
 class ForcePasswordChangeDialog(QDialog):
@@ -313,7 +314,8 @@ class ForcePasswordChangeDialog(QDialog):
             QMessageBox.information(self, "Success", "Your password has been changed successfully.")
             self.accept() # Close the dialog
         except Exception as e:
-            QMessageBox.critical(self, "Database Error", f"An unexpected error occurred: {e}")
+            logging.error(f"Error forcing password change: {e}", exc_info=True)
+            QMessageBox.critical(self, "Database Error", "An unexpected error occurred. Please try again later.")
 
     def closeEvent(self, event):
         # Override the close event to prevent the dialog from closing
@@ -1204,7 +1206,8 @@ class LoginDialog(QDialog):
 
             self.stacked_widget.setCurrentWidget(self.login_page_stack) # Go back to the login view
         except Exception as e:
-            QMessageBox.critical(self, "Database Error", f"An error occurred during registration: {e}")
+            logging.error(f"Error during registration: {e}", exc_info=True)
+            QMessageBox.critical(self, "Database Error", "An error occurred during registration. Please try again later.")
 
     def closeEvent(self, event):
         if not self.current_user:
@@ -1268,7 +1271,8 @@ class OTPSetupDialog(QDialog):
                 database.set_otp_secret(self.user_id, self.otp_secret)
                 self.accept() # Signal success
             except Exception as e:
-                QMessageBox.critical(self, "Database Error", f"Could not save OTP secret: {e}")
+                logging.error(f"Error saving OTP secret: {e}", exc_info=True)
+                QMessageBox.critical(self, "Database Error", "Could not save OTP secret. Please try again later.")
                 self.reject() # Signal failure
         else:
             QMessageBox.warning(self, "Verification Failed", "The code is incorrect. Please try again.")
