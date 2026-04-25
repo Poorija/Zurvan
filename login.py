@@ -94,13 +94,17 @@ class PasswordResetDialog(QDialog):
         new_pass_toggle_button.setFixedSize(28, 28)
         new_pass_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         new_pass_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        new_pass_toggle_button.setToolTip("Show Password")
+        new_pass_toggle_button.setAccessibleName("Toggle password visibility")
         def toggle_new_pass_visibility(checked):
             if checked:
                 self.new_pass_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                 new_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+                new_pass_toggle_button.setToolTip("Hide Password")
             else:
                 self.new_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
                 new_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+                new_pass_toggle_button.setToolTip("Show Password")
         new_pass_toggle_button.toggled.connect(toggle_new_pass_visibility)
         new_pass_layout.addWidget(new_pass_toggle_button)
         layout.addRow("New Password:", new_pass_container)
@@ -117,13 +121,17 @@ class PasswordResetDialog(QDialog):
         confirm_pass_toggle_button.setFixedSize(28, 28)
         confirm_pass_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         confirm_pass_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        confirm_pass_toggle_button.setToolTip("Show Password")
+        confirm_pass_toggle_button.setAccessibleName("Toggle password visibility")
         def toggle_confirm_pass_visibility(checked):
             if checked:
                 self.confirm_pass_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                 confirm_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+                confirm_pass_toggle_button.setToolTip("Hide Password")
             else:
                 self.confirm_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
                 confirm_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+                confirm_pass_toggle_button.setToolTip("Show Password")
         confirm_pass_toggle_button.toggled.connect(toggle_confirm_pass_visibility)
         confirm_pass_layout.addWidget(confirm_pass_toggle_button)
         layout.addRow("Confirm Password:", confirm_pass_container)
@@ -237,13 +245,17 @@ class ForcePasswordChangeDialog(QDialog):
         new_pass_toggle_button.setFixedSize(28, 28)
         new_pass_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         new_pass_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        new_pass_toggle_button.setToolTip("Show Password")
+        new_pass_toggle_button.setAccessibleName("Toggle password visibility")
         def toggle_new_pass_visibility(checked):
             if checked:
                 self.new_pass_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                 new_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+                new_pass_toggle_button.setToolTip("Hide Password")
             else:
                 self.new_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
                 new_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+                new_pass_toggle_button.setToolTip("Show Password")
         new_pass_toggle_button.toggled.connect(toggle_new_pass_visibility)
         new_pass_layout.addWidget(new_pass_toggle_button)
         layout.addRow("New Password:", new_pass_container)
@@ -260,13 +272,17 @@ class ForcePasswordChangeDialog(QDialog):
         confirm_pass_toggle_button.setFixedSize(28, 28)
         confirm_pass_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         confirm_pass_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        confirm_pass_toggle_button.setToolTip("Show Password")
+        confirm_pass_toggle_button.setAccessibleName("Toggle password visibility")
         def toggle_confirm_pass_visibility(checked):
             if checked:
                 self.confirm_pass_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                 confirm_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+                confirm_pass_toggle_button.setToolTip("Hide Password")
             else:
                 self.confirm_pass_edit.setEchoMode(QLineEdit.EchoMode.Password)
                 confirm_pass_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+                confirm_pass_toggle_button.setToolTip("Show Password")
         confirm_pass_toggle_button.toggled.connect(toggle_confirm_pass_visibility)
         confirm_pass_layout.addWidget(confirm_pass_toggle_button)
         layout.addRow("Confirm Password:", confirm_pass_container)
@@ -544,14 +560,18 @@ class LoginDialog(QDialog):
         toggle_button.setFixedSize(28, 28)
         toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        toggle_button.setToolTip("Show Password")
+        toggle_button.setAccessibleName("Toggle password visibility")
 
         def toggle_login_password_visibility(checked):
             if checked:
                 self.login_password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                 toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+                toggle_button.setToolTip("Hide Password")
             else:
                 self.login_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
                 toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+                toggle_button.setToolTip("Show Password")
 
         toggle_button.toggled.connect(toggle_login_password_visibility)
         password_layout.addWidget(toggle_button)
@@ -681,13 +701,17 @@ class LoginDialog(QDialog):
         reg_toggle_button.setFixedSize(28, 28)
         reg_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         reg_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        reg_toggle_button.setToolTip("Show Password")
+        reg_toggle_button.setAccessibleName("Toggle password visibility")
         def toggle_reg_password_visibility(checked):
             if checked:
                 self.reg_password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                 reg_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+                reg_toggle_button.setToolTip("Hide Password")
             else:
                 self.reg_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
                 reg_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+                reg_toggle_button.setToolTip("Show Password")
         reg_toggle_button.toggled.connect(toggle_reg_password_visibility)
         reg_password_layout.addWidget(reg_toggle_button)
         form_layout.addRow("Password:", reg_password_container)
@@ -704,13 +728,17 @@ class LoginDialog(QDialog):
         reg_confirm_toggle_button.setFixedSize(28, 28)
         reg_confirm_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         reg_confirm_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        reg_confirm_toggle_button.setToolTip("Show Password")
+        reg_confirm_toggle_button.setAccessibleName("Toggle password visibility")
         def toggle_reg_confirm_password_visibility(checked):
             if checked:
                 self.reg_confirm_password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                 reg_confirm_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+                reg_confirm_toggle_button.setToolTip("Hide Password")
             else:
                 self.reg_confirm_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
                 reg_confirm_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+                reg_confirm_toggle_button.setToolTip("Show Password")
         reg_confirm_toggle_button.toggled.connect(toggle_reg_confirm_password_visibility)
         reg_confirm_layout.addWidget(reg_confirm_toggle_button)
         form_layout.addRow("Confirm Password:", reg_confirm_container)
@@ -977,13 +1005,17 @@ class LoginDialog(QDialog):
         admin_toggle_button.setFixedSize(28, 28)
         admin_toggle_button.setCursor(Qt.CursorShape.PointingHandCursor)
         admin_toggle_button.setStyleSheet("QPushButton { border: none; background-color: transparent; }")
+        admin_toggle_button.setToolTip("Show Password")
+        admin_toggle_button.setAccessibleName("Toggle password visibility")
         def toggle_admin_password_visibility(checked):
             if checked:
                 self.admin_password_edit.setEchoMode(QLineEdit.EchoMode.Normal)
                 admin_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye.svg')))
+                admin_toggle_button.setToolTip("Hide Password")
             else:
                 self.admin_password_edit.setEchoMode(QLineEdit.EchoMode.Password)
                 admin_toggle_button.setIcon(QIcon(os.path.join(os.path.dirname(__file__), 'icons', 'eye-off.svg')))
+                admin_toggle_button.setToolTip("Show Password")
         admin_toggle_button.toggled.connect(toggle_admin_password_visibility)
         admin_password_layout.addWidget(admin_toggle_button)
         form_layout.addRow("Admin Password:", admin_password_container)
