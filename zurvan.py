@@ -106,6 +106,7 @@ from PyQt6.QtWidgets import (
     QProgressBar, QTextBrowser, QRadioButton, QButtonGroup, QFormLayout, QGridLayout, QDialog,
     QHeaderView, QInputDialog, QGraphicsOpacityEffect, QStackedWidget, QToolButton, QTableView, QDateEdit, QSpinBox
 )
+from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QSequentialAnimationGroup
 from ai_tab import AIAssistantTab, AISettingsDialog, AIGuideDialog
 from login import LoginDialog
 from admin_panel import AdminPanelDialog
@@ -1588,7 +1589,8 @@ class Zurvan(QMainWindow):
 
         # Set window icon using the new helper method
         self.setWindowIcon(QIcon(self.icon_path("Zurvan-mono.png")))
-        self.setGeometry(100, 100, 1200, 800)
+        # Use dynamic layout instead of fixed geometry, start maximized for responsiveness
+        self.showMaximized()
 
         self.current_user = None
         self.packets_data = []; self.sniffer_thread = None; self.channel_hopper = None
@@ -2711,8 +2713,9 @@ class Zurvan(QMainWindow):
         extra_qss = {
             'QGroupBox': {
                 'border': '1px solid #444;',
-                'border-radius': '8px',
+                'border-radius': '16px',
                 'margin-top': '10px',
+                'padding-top': '15px',
             },
             'QGroupBox::title': {
                 'subcontrol-origin': 'margin',
@@ -2722,30 +2725,46 @@ class Zurvan(QMainWindow):
             'QTabWidget::pane': {
                 'border-top': '1px solid #444;',
                 'margin-top': '-1px',
+                'border-radius': '12px',
             },
             'QFrame': {
-                'border-radius': '8px',
+                'border-radius': '12px',
             },
             'QPushButton': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px 16px',
             },
             'QLineEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '6px 12px',
             },
             'QComboBox': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '6px 12px',
             },
             'QTextEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px',
             },
             'QPlainTextEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px',
             },
             'QListWidget': {
-                'border-radius': '8px',
+                'border-radius': '12px',
             },
             'QTreeWidget': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+            },
+            'QPushButton:hover': {
+                'background-color': '{{primaryColor}}',
+                'color': '{{secondaryDarkColor}}',
+                'border': '2px solid {{primaryLightColor}}',
+            },
+            'QPushButton:pressed': {
+                'background-color': '{{secondaryColor}}',
+                'color': '{{primaryColor}}',
+                'border': '2px solid {{primaryColor}}',
             }
         }
 
@@ -4828,6 +4847,18 @@ class Zurvan(QMainWindow):
     def _on_main_tab_changed(self, index):
         """Handler for when the main tab is changed, to auto-load data."""
         try:
+            # Apply fade-in animation to the newly selected tab
+            current_widget = self.tab_widget.widget(index)
+            if current_widget:
+                self.tab_opacity_effect = QGraphicsOpacityEffect(current_widget)
+                current_widget.setGraphicsEffect(self.tab_opacity_effect)
+                self.tab_animation = QPropertyAnimation(self.tab_opacity_effect, b"opacity")
+                self.tab_animation.setDuration(300)
+                self.tab_animation.setStartValue(0.0)
+                self.tab_animation.setEndValue(1.0)
+                self.tab_animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+                self.tab_animation.start()
+
             # Stop the timer if it's running, regardless of which tab was previously selected.
             # The logic below will restart it if the new tab is the correct one.
             if self.journal_refresh_timer and self.journal_refresh_timer.isActive():
@@ -19563,12 +19594,13 @@ def main():
 
         login_dialog = LoginDialog()
 
-        # Define the custom stylesheet additions
+        # Define the custom stylesheet additions for 2026 UI Trends
         extra_qss = {
             'QGroupBox': {
                 'border': '1px solid #444;',
-                'border-radius': '8px',
+                'border-radius': '16px',
                 'margin-top': '10px',
+                'padding-top': '15px',
             },
             'QGroupBox::title': {
                 'subcontrol-origin': 'margin',
@@ -19578,30 +19610,46 @@ def main():
             'QTabWidget::pane': {
                 'border-top': '1px solid #444;',
                 'margin-top': '-1px',
+                'border-radius': '12px',
             },
             'QFrame': {
-                'border-radius': '8px',
+                'border-radius': '12px',
             },
             'QPushButton': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px 16px',
             },
             'QLineEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '6px 12px',
             },
             'QComboBox': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '6px 12px',
             },
             'QTextEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px',
             },
             'QPlainTextEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px',
             },
             'QListWidget': {
-                'border-radius': '8px',
+                'border-radius': '12px',
             },
             'QTreeWidget': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+            },
+            'QPushButton:hover': {
+                'background-color': '{{primaryColor}}',
+                'color': '{{secondaryDarkColor}}',
+                'border': '2px solid {{primaryLightColor}}',
+            },
+            'QPushButton:pressed': {
+                'background-color': '{{secondaryColor}}',
+                'color': '{{primaryColor}}',
+                'border': '2px solid {{primaryColor}}',
             }
         }
 

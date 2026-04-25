@@ -1,0 +1,6 @@
+<!-- A dummy cyberpunk theme XML file for testing -->
+<theme>
+    <color name="primary" value="#00ffcc" />
+    <color name="secondary" value="#ff00ff" />
+    <color name="background" value="#0a0a1a" />
+</theme>

@@ -326,7 +326,7 @@ class LoginDialog(QDialog):
         self.setWindowTitle("Zurvan - Login")
         self.setModal(True)
         self.current_user = None
-        self.selected_theme = 'dark_cyan.xml' # Default theme
+        self.selected_theme = 'cyberpunk.xml' # Default theme
         self.captcha_text = None
         self.reg_captcha_text = None
 
@@ -422,8 +422,9 @@ class LoginDialog(QDialog):
         extra_qss = {
             'QGroupBox': {
                 'border': '1px solid #444;',
-                'border-radius': '8px',
+                'border-radius': '16px',
                 'margin-top': '10px',
+                'padding-top': '15px',
             },
             'QGroupBox::title': {
                 'subcontrol-origin': 'margin',
@@ -433,30 +434,46 @@ class LoginDialog(QDialog):
             'QTabWidget::pane': {
                 'border-top': '1px solid #444;',
                 'margin-top': '-1px',
+                'border-radius': '12px',
             },
             'QFrame': {
-                'border-radius': '8px',
+                'border-radius': '12px',
             },
             'QPushButton': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px 16px',
             },
             'QLineEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '6px 12px',
             },
             'QComboBox': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '6px 12px',
             },
             'QTextEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px',
             },
             'QPlainTextEdit': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+                'padding': '8px',
             },
             'QListWidget': {
-                'border-radius': '8px',
+                'border-radius': '12px',
             },
             'QTreeWidget': {
-                'border-radius': '8px',
+                'border-radius': '12px',
+            },
+            'QPushButton:hover': {
+                'background-color': '{{primaryColor}}',
+                'color': '{{secondaryDarkColor}}',
+                'border': '2px solid {{primaryLightColor}}',
+            },
+            'QPushButton:pressed': {
+                'background-color': '{{secondaryColor}}',
+                'color': '{{primaryColor}}',
+                'border': '2px solid {{primaryColor}}',
             }
         }
         apply_stylesheet(QApplication.instance(), theme=self.selected_theme, extra=extra_qss)
