@@ -6635,7 +6635,7 @@ class Zurvan(QMainWindow):
 
     def _build_social_analyzer_command(self, controls):
         """Builds the Social Analyzer command list from a dictionary of controls or widgets."""
-        command = ["python3", "tools/social-analyzer/main.py", "--cli", "--silent"]
+        command = ["python3", "tools/social-analyzer/app.py", "--cli", "--silent"]
 
         username = self._get_control_value(controls, 'username_edit', 'text')
         if not username or not username.strip():
@@ -6658,9 +6658,9 @@ class Zurvan(QMainWindow):
             QMessageBox.critical(self, "Input Error", error)
             return
 
-        social_analyzer_path = os.path.join(self.script_dir, "tools", "social-analyzer", "main.py")
+        social_analyzer_path = os.path.join(self.script_dir, "tools", "social-analyzer", "app.py")
         if not os.path.exists(social_analyzer_path):
-            QMessageBox.critical(self, "Social Analyzer Error", f"'main.py' not found at {social_analyzer_path}.")
+            QMessageBox.critical(self, "Social Analyzer Error", f"'app.py' not found at {social_analyzer_path}.")
             return
 
         self.is_tool_running = True
@@ -6940,7 +6940,7 @@ class Zurvan(QMainWindow):
 
     def _build_sherlock_command(self, controls, csv_temp_dir=None):
         """Builds the Sherlock command list from a dictionary of controls or widgets."""
-        sherlock_executable = os.path.join(self.script_dir, "tools", "Sherlock", "sherlock", "sherlock.py")
+        sherlock_executable = os.path.join(self.script_dir, "tools", "sherlock", "sherlock", "sherlock.py")
         command = ["python3", sherlock_executable, "--no-color"]
 
         usernames = self._get_control_value(controls, 'usernames_edit', 'text')
@@ -6978,7 +6978,7 @@ class Zurvan(QMainWindow):
             QMessageBox.critical(self, "Input Error", error)
             return
 
-        sherlock_path = os.path.join(self.script_dir, "tools", "Sherlock", "sherlock", "sherlock.py")
+        sherlock_path = os.path.join(self.script_dir, "tools", "sherlock", "sherlock", "sherlock.py")
         if not os.path.exists(sherlock_path):
             QMessageBox.critical(self, "Sherlock Error", f"'sherlock.py' not found at {sherlock_path}.")
             return
@@ -12586,7 +12586,7 @@ class Zurvan(QMainWindow):
 
     def _build_social_analyzer_command(self, controls):
         """Builds the Social Analyzer command list from a dictionary of controls or widgets."""
-        command = ["python3", "tools/social-analyzer/main.py", "--cli", "--silent"]
+        command = ["python3", "tools/social-analyzer/app.py", "--cli", "--silent"]
 
         username = self._get_control_value(controls, 'username_edit', 'text')
         if not username or not username.strip():
@@ -12609,9 +12609,9 @@ class Zurvan(QMainWindow):
             QMessageBox.critical(self, "Input Error", error)
             return
 
-        social_analyzer_path = os.path.join(self.script_dir, "tools", "social-analyzer", "main.py")
+        social_analyzer_path = os.path.join(self.script_dir, "tools", "social-analyzer", "app.py")
         if not os.path.exists(social_analyzer_path):
-            QMessageBox.critical(self, "Social Analyzer Error", f"'main.py' not found at {social_analyzer_path}.")
+            QMessageBox.critical(self, "Social Analyzer Error", f"'app.py' not found at {social_analyzer_path}.")
             return
 
         self.is_tool_running = True
