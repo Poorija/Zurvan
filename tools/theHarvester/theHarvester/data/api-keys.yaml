@@ -1,0 +1,106 @@
+apikeys:
+
+  bevigil:
+    key:
+
+  bitbucket:
+    key:
+
+  brave:
+    key:
+
+  bufferoverun:
+    key:
+
+  builtwith:
+    key:
+
+  censys:
+    id:
+    secret:
+
+  criminalip:
+    key:
+
+  dehashed:
+    key:
+
+  dnsdumpster:
+    key:
+
+  fofa:
+    key:
+    email:
+
+  fullhunt:
+    key:
+
+  github:
+    key:
+
+  hackertarget:
+    key:
+
+  haveibeenpwned:
+    key:
+
+  hunter:
+    key:
+
+  hunterhow:
+    key:
+
+  intelx:
+    key:
+
+  leakix:
+    key:
+
+  leaklookup:
+    key:
+
+  mojeek:
+    key:
+  
+  netlas:
+    key:
+
+  onyphe:
+    key:
+
+  pentestTools:
+    key:
+
+  projectDiscovery:
+    key:
+
+  rocketreach:
+    key:
+
+  securityscorecard:
+    key:
+
+  securityTrails:
+    key:
+
+  shodan:
+    key:
+
+  tomba:
+    key:
+    secret:
+
+  venacus:
+    key:
+
+  virustotal:
+    key:
+
+  whoisxml:
+    key:
+
+  windvane:
+    key:
+
+  zoomeye:
+    key:

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WHATWEB_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BREW_RUBY="/opt/homebrew/opt/ruby/bin/ruby"
+
+if [[ ! -x "${BREW_RUBY}" ]]; then
+  BREW_RUBY="$(command -v ruby)"
+fi
+
+exec "${BREW_RUBY}" "${WHATWEB_ROOT}/whatweb" "$@"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NIKTO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${NIKTO_ROOT}/../.." && pwd)"
+PERL5_LOCAL_LIB="${REPO_ROOT}/tools/perl5/lib/perl5"
+
+export PERL5LIB="${PERL5_LOCAL_LIB}${PERL5LIB:+:${PERL5LIB}}"
+exec perl "${NIKTO_ROOT}/program/nikto.pl" "$@"
