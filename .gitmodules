@@ -1,0 +1,15 @@
+[submodule "tools/Infoga"]
+	path = tools/Infoga
+	url = https://github.com/The404Hacking/Infoga.git
+[submodule "tools/PhoneInfoga"]
+	path = tools/PhoneInfoga
+	url = https://github.com/sundowndev/phoneinfoga.git
+[submodule "tools/Photon"]
+	path = tools/Photon
+	url = https://github.com/s0md3v/Photon.git
+[submodule "tools/metagoofil"]
+	path = tools/metagoofil
+	url = https://github.com/opsdisk/metagoofil.git
+[submodule "tools/social-analyzer"]
+	path = tools/social-analyzer
+	url = https://github.com/qeeqbox/social-analyzer.git
