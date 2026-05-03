@@ -6635,7 +6635,7 @@ class Zurvan(QMainWindow):
 
     def _build_social_analyzer_command(self, controls):
         """Builds the Social Analyzer command list from a dictionary of controls or widgets."""
-        command = ["python3", "tools/social-analyzer/main.py", "--cli", "--silent"]
+        command = ["python3", "tools/social-analyzer/app.py", "--cli", "--silent"]
 
         username = self._get_control_value(controls, 'username_edit', 'text')
         if not username or not username.strip():
@@ -12586,7 +12586,7 @@ class Zurvan(QMainWindow):
 
     def _build_social_analyzer_command(self, controls):
         """Builds the Social Analyzer command list from a dictionary of controls or widgets."""
-        command = ["python3", "tools/social-analyzer/main.py", "--cli", "--silent"]
+        command = ["python3", "tools/social-analyzer/app.py", "--cli", "--silent"]
 
         username = self._get_control_value(controls, 'username_edit', 'text')
         if not username or not username.strip():
